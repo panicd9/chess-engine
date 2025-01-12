@@ -1,4 +1,4 @@
-use crate::chessboard::{Bitboard, Chessboard, Square};
+use crate::chessboard::{Bitboard, Chessboard, SingletonBitboard, Square};
 
 pub const KING_MOVES_CAPACITY: usize = 4;
 
@@ -22,7 +22,7 @@ fn king_attacks(square: Square) -> Bitboard {
     KING_ATTACKS[square]
 }
 
-fn king_attacks_from_single_king_bitboard(king: Bitboard) -> Bitboard {
+fn king_attacks_from_single_king_bitboard(king: SingletonBitboard) -> Bitboard {
     // Get the square of the king
     let square = king.trailing_zeros() as usize;
 

@@ -87,7 +87,6 @@ pub(crate) const FILE_MASKS: [u64; 8] = [
     0x8080808080808080,
 ];
 
-#[derive(Clone)]
 pub(crate) struct Chessboard {
     pub white_pawns: u64,
     pub black_pawns: u64,
@@ -102,7 +101,30 @@ pub(crate) struct Chessboard {
     pub white_king: u64,
     pub black_king: u64,
 
+    pub en_passant: SingletonBitboard,
+
     pub side_to_move: Color,
+}
+
+impl Clone for Chessboard {
+    fn clone(&self) -> Self {
+        Chessboard {
+            white_pawns: self.white_pawns,
+            black_pawns: self.black_pawns,
+            white_knights: self.white_knights,
+            black_knights: self.black_knights,
+            white_bishops: self.white_bishops,
+            black_bishops: self.black_bishops,
+            white_rooks: self.white_rooks,
+            black_rooks: self.black_rooks,
+            white_queens: self.white_queens,
+            black_queens: self.black_queens,
+            white_king: self.white_king,
+            black_king: self.black_king,
+            en_passant: 0x0, // Clear en_passant
+            side_to_move: self.side_to_move,
+        }
+    }
 }
 
 impl Chessboard {
@@ -121,6 +143,7 @@ impl Chessboard {
             white_king: 0x0000000000000010,
             black_king: 0x1000000000000000,
 
+            en_passant: 0x0,
             side_to_move: Color::White,
         }
     }
@@ -172,12 +195,12 @@ impl Chessboard {
         }
     }
     
-    pub(crate) fn get_en_passant_bitboard(&self) -> u64 {
-        todo!()
+    pub(crate) fn get_en_passant_bitboard(&self) -> SingletonBitboard {
+        self.en_passant
     }
 
     pub fn display_board_string(&self) -> String{
-        display::display_board_string(self, None)
+        display::display_board_string(self, None)               
     }
 
     pub fn change_side_to_move(&mut self) {
@@ -306,7 +329,7 @@ impl Chessboard {
         new_chessboard.black_bishops |= to;
 
         // Capture enemy piece if it exists
-        let occupancy = self.get_occupancy();
+        let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_white_piece(to);
         }
@@ -314,4 +337,115 @@ impl Chessboard {
         new_chessboard.change_side_to_move();
         new_chessboard
     }
+    
+    pub fn make_white_pawn_forward_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the pawn
+        new_chessboard.white_pawns &= !from;
+        new_chessboard.white_pawns |= to;
+        
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+
+    pub fn make_black_pawn_forward_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the pawn
+        new_chessboard.black_pawns &= !from;
+        new_chessboard.black_pawns |= to;
+        
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+
+    pub fn make_white_pawn_double_forward_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the pawn
+        new_chessboard.white_pawns &= !from;
+        new_chessboard.white_pawns |= to;
+
+        new_chessboard.en_passant = to >> 8;
+        
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+
+    pub fn make_black_pawn_double_forward_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the pawn
+        new_chessboard.black_pawns &= !from;
+        new_chessboard.black_pawns |= to;
+
+        new_chessboard.en_passant = to << 8;
+        
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+    
+    pub fn make_white_pawn_capture_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the pawn
+        new_chessboard.white_pawns &= !from;
+        new_chessboard.white_pawns |= to;
+
+        // Capture enemy piece
+        new_chessboard.capture_black_piece(to);
+        
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+
+    pub fn make_black_pawn_capture_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the pawn
+        new_chessboard.black_pawns &= !from;
+        new_chessboard.black_pawns |= to;
+
+        // Capture enemy piece
+        new_chessboard.capture_white_piece(to);
+
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+    
+    pub fn make_white_queen_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the queen
+        new_chessboard.white_queens &= !from;
+        new_chessboard.white_queens |= to;
+
+        // Capture enemy piece if it exists
+        let occupancy = self.get_black_occupancy();
+        if occupancy & to != 0 {
+            new_chessboard.capture_black_piece(to);
+        }
+
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+
+    pub fn make_black_queen_move(&self, from: SingletonBitboard, to: SingletonBitboard) -> Chessboard {
+        let mut new_chessboard = self.clone();
+
+        // Move the queen
+        new_chessboard.black_queens &= !from;
+        new_chessboard.black_queens |= to;
+
+        // Capture enemy piece if it exists
+        let occupancy = self.get_white_occupancy();
+        if occupancy & to != 0 {
+            new_chessboard.capture_white_piece(to);
+        }
+
+        new_chessboard.change_side_to_move();
+        new_chessboard
+    }
+    
 }

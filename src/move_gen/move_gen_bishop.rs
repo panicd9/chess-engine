@@ -27,7 +27,7 @@ fn single_bishop_anti_diagonal_attacks(occupancy: u64, bishop: u64) -> u64 {
 }
 
 // Generate bishop attacks combining both diagonals and anti-diagonals.
-fn single_bishop_attacks(occupancy: u64, bishop: u64) -> u64 {
+pub fn single_bishop_attacks(occupancy: u64, bishop: u64) -> u64 {
     single_bishop_diagonal_attacks(occupancy, bishop) | single_bishop_anti_diagonal_attacks(occupancy, bishop)
 }
 

@@ -35,7 +35,7 @@ fn single_rook_file_attacks(occupancy: u64, rook: u64) -> u64 {
 }
 
 // Generate rook attacks combining both rank and file attacks.
-fn single_rook_attacks(occupancy: u64, rook: u64) -> u64 {
+pub fn single_rook_attacks(occupancy: u64, rook: u64) -> u64 {
     single_rook_rank_attacks(occupancy, rook) | single_rook_file_attacks(occupancy, rook)
 }
 
