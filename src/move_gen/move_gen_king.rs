@@ -1,4 +1,4 @@
-use crate::chessboard::{Bitboard, Chessboard, SingletonBitboard, Square};
+use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, Square}, utils::{WHITE_KING_CASTLE_SQUARES, WHITE_QUEEN_CASTLE_SQUARES}};
 
 pub const KING_MOVES_CAPACITY: usize = 4;
 
@@ -17,25 +17,27 @@ static KING_ATTACKS: [Bitboard; 64] = [
 
 // Function to get the king attacks for a given square
 #[inline(always)]
-fn king_attacks(square: Square) -> Bitboard {
+pub fn king_attacks_from_square(square: Square) -> Bitboard {
     // Return the pre-calculated attack pattern for the given square
     KING_ATTACKS[square]
 }
 
-fn king_attacks_from_single_king_bitboard(king: SingletonBitboard) -> Bitboard {
+pub fn king_attacks(king: SingletonBitboard) -> Bitboard {
     // Get the square of the king
     let square = king.trailing_zeros() as usize;
 
     // Get the attack pattern for the king
-    king_attacks(square)
+    king_attacks_from_square(square)
 }
 
-fn white_kings_pseudolegal_moves(cb: &Chessboard, king: Bitboard) -> Vec<Chessboard> {
+pub fn white_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(KING_MOVES_CAPACITY);
-    
-    let attacks = king_attacks_from_single_king_bitboard(king) ^ cb.get_white_occupancy();
+    let king = cb.white_king;
 
+    // Normal king moves
+    let attacks = king_attacks(king) ^ cb.get_white_occupancy();
     let mut remaining_attacks = attacks;
+
     while remaining_attacks != 0 {
         let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
         let new_position = cb.make_white_king_move(king, single_attack_bitboard);
@@ -43,13 +45,35 @@ fn white_kings_pseudolegal_moves(cb: &Chessboard, king: Bitboard) -> Vec<Chessbo
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
 
+    // Castling moves
+    if cb.white_can_castle_king_side {
+        // Kingside castling: ensure the squares between the king and rook are empty
+        let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_SQUARES & cb.get_occupancy() == 0;
+        let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_SQUARES) != 0;
+        if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
+            let new_position = cb.make_white_kingside_castle();
+            new_positions.push(new_position);
+        }
+    }
+
+    if cb.white_can_castle_queen_side {
+        // Queenside castling: ensure the squares between the king and rook are empty
+        let are_queen_side_castle_squares_emptu = WHITE_QUEEN_CASTLE_SQUARES = 0xE;
+        let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_SQUARES) != 0;
+        if are_queen_side_castle_squares_emptu && !are_queenside_castle_squares_attacked {
+            let new_position = cb.make_white_queenside_castle();
+            new_positions.push(new_position);
+        }
+    }
+
     new_positions
 }
 
-fn black_kings_pseudolegal_moves(cb: &Chessboard, king: Bitboard) -> Vec<Chessboard> {
+pub fn black_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(KING_MOVES_CAPACITY);
-    
-    let attacks = king_attacks_from_single_king_bitboard(king) ^ cb.get_black_occupancy();
+    let king = cb.black_king;
+
+    let attacks = king_attacks(king) ^ cb.get_black_occupancy();
 
     let mut remaining_attacks = attacks;
     while remaining_attacks != 0 {

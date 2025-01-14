@@ -1,7 +1,7 @@
 use crate::{
     chessboard::{
         rank_masks::{RANK_1, RANK_8},
-        Chessboard, WHITE_KING_CASTLE_SQURE, WHITE_KING_START_SQUARE, WHITE_QUEEN_CASTLE_SQURE,
+        Chessboard, WHITE_KING_CASTLE_SQUARE, WHITE_KING_START_SQUARE, WHITE_QUEEN_CASTLE_SQUARE,
     },
     piece::Piece,
 };
@@ -80,11 +80,11 @@ impl Move {
 
                 // Check for castling (least frequent but must be prioritized due to overlap with quiet moves)
                 if from == WHITE_KING_START_SQUARE {
-                    if to == WHITE_KING_CASTLE_SQURE {
+                    if to == WHITE_KING_CASTLE_SQUARE {
                         return Self::new_with_flags(Piece::King, from, to, Self::CASTLE_KING);
                     }
 
-                    if to == WHITE_QUEEN_CASTLE_SQURE {
+                    if to == WHITE_QUEEN_CASTLE_SQUARE {
                         return Self::new_with_flags(Piece::King, from, to, Self::CASTLE_QUEEN);
                     }
                 }

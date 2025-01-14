@@ -39,50 +39,37 @@ pub fn single_rook_attacks(occupancy: u64, rook: u64) -> u64 {
     single_rook_rank_attacks(occupancy, rook) | single_rook_file_attacks(occupancy, rook)
 }
 
-fn all_rooks_rank_attacks(occupancy: u64, rooks: u64) -> u64 {
-    let mut rank_attacks = 0;
+pub fn all_rooks_attacks(occupancy: u64, rooks: u64) -> u64 {
+    let mut total_attacks = 0;
     let mut remaining_rooks = rooks;
 
     while remaining_rooks != 0 {
         let single_rook = remaining_rooks & remaining_rooks.wrapping_neg(); // Extract LSB (single rook)
-        let rank = single_rook.trailing_zeros() / 8; // Calculate rank of the rook
+        let square = single_rook.trailing_zeros();
+
+        // Rank calculation
+        let rank = square / 8;
         let rank_mask = RANK_MASKS[rank as usize];
         let rank_occupancy = occupancy & rank_mask;
+        total_attacks |= calculate_sliding_attacks(rank_mask, single_rook, rank_occupancy);
 
-        rank_attacks |= calculate_sliding_attacks(rank_mask, single_rook, rank_occupancy);
-
-        remaining_rooks &= remaining_rooks - 1; // Remove LSB
-    }
-
-    rank_attacks
-}
-
-fn all_rooks_file_attacks(occupancy: u64, rooks: u64) -> u64 {
-    let mut file_attacks = 0;
-    let mut remaining_rooks = rooks;
-
-    while remaining_rooks != 0 {
-        let single_rook = remaining_rooks & remaining_rooks.wrapping_neg(); // Extract LSB (single rook)
-        let file = single_rook.trailing_zeros() % 8; // Calculate file of the rook
+        // File calculation
+        let file = square % 8;
         let file_mask = FILE_MASKS[file as usize];
         let file_occupancy = occupancy & file_mask;
+        total_attacks |= calculate_sliding_attacks(file_mask, single_rook, file_occupancy);
 
-        file_attacks |= calculate_sliding_attacks(file_mask, single_rook, file_occupancy);
-
-        remaining_rooks &= remaining_rooks - 1; // Remove LSB
+        // Remove the processed rook
+        remaining_rooks &= remaining_rooks - 1;
     }
 
-    file_attacks
+    total_attacks
 }
 
-// Generate all rook attacks for the given board.
-fn all_rooks_attacks(occupancy: u64, rooks: u64) -> u64 {
-    all_rooks_rank_attacks(occupancy, rooks) | all_rooks_file_attacks(occupancy, rooks)
-}
 
-fn white_rooks_pseudolegal_moves(cb: &Chessboard, rooks: Bitboard) -> Vec<Chessboard> {
+pub fn white_rooks_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
-    let mut remaining_rooks = rooks;
+    let mut remaining_rooks = cb.white_rooks;
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
@@ -104,9 +91,9 @@ fn white_rooks_pseudolegal_moves(cb: &Chessboard, rooks: Bitboard) -> Vec<Chessb
     new_positions
 }
 
-fn black_rooks_pseudolegal_moves(cb: &Chessboard, rooks: Bitboard) -> Vec<Chessboard> {
+pub fn black_rooks_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
-    let mut remaining_rooks = rooks;
+    let mut remaining_rooks = cb.black_rooks;
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook

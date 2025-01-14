@@ -22,7 +22,7 @@ fn knight_attacks(square: Square) -> Bitboard {
     KNIGHT_ATTACKS[square]
 }
 
-fn knight_attacks_from_single_knight_bitboard(knight: Bitboard) -> Bitboard {
+pub fn knight_attacks_from_single_knight_bitboard(knight: Bitboard) -> Bitboard {
     // Get the square of the knight
     let square = knight.trailing_zeros() as usize;
 
@@ -30,9 +30,9 @@ fn knight_attacks_from_single_knight_bitboard(knight: Bitboard) -> Bitboard {
     knight_attacks(square)
 }
 
-fn white_knights_pseudolegal_moves(cb: &Chessboard, knights: Bitboard) -> Vec<Chessboard> {
+pub fn white_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
-    let mut remaining_knights = knights;
+    let mut remaining_knights = cb.white_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
@@ -52,9 +52,9 @@ fn white_knights_pseudolegal_moves(cb: &Chessboard, knights: Bitboard) -> Vec<Ch
     new_positions
 }
 
-fn black_knights_pseudolegal_moves(cb: &Chessboard, knights: Bitboard) -> Vec<Chessboard> {
+pub fn black_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
-    let mut remaining_knights = knights;
+    let mut remaining_knights = cb.black_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight

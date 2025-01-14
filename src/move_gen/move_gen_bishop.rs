@@ -31,7 +31,7 @@ pub fn single_bishop_attacks(occupancy: u64, bishop: u64) -> u64 {
     single_bishop_diagonal_attacks(occupancy, bishop) | single_bishop_anti_diagonal_attacks(occupancy, bishop)
 }
 
-fn all_bishops_attacks(occupancy: u64, bishops: u64) -> u64 {
+pub fn all_bishops_attacks(occupancy: u64, bishops: u64) -> u64 {
     let mut diagonal_attacks = 0;
     let mut remaining_bishops = bishops;
 
@@ -56,9 +56,9 @@ fn all_bishops_attacks(occupancy: u64, bishops: u64) -> u64 {
     diagonal_attacks
 }
 
-fn white_bishops_pseudolegal_moves(cb: &Chessboard, bishops: Bitboard) -> Vec<Chessboard> {
+pub fn white_bishops_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(BISHOPS_MOVES_CAPACITY);
-    let mut remaining_bishops = bishops;
+    let mut remaining_bishops = cb.white_bishops;
 
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
@@ -79,9 +79,9 @@ fn white_bishops_pseudolegal_moves(cb: &Chessboard, bishops: Bitboard) -> Vec<Ch
     new_positions
 }
 
-fn black_bishops_pseudolegal_moves(cb: &Chessboard, bishops: Bitboard) -> Vec<Chessboard> {
+pub fn black_bishops_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(BISHOPS_MOVES_CAPACITY);
-    let mut remaining_bishops = bishops;
+    let mut remaining_bishops = cb.black_bishops;
 
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop

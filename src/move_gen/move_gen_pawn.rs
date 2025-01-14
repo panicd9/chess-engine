@@ -1,4 +1,6 @@
-use crate::chessboard::{rank_masks::{RANK_2, RANK_7}, Bitboard, Chessboard};
+use crate::chessboard::{
+    file_masks::{FILE_A, FILE_H}, rank_masks::{RANK_2, RANK_7}, Bitboard, Chessboard
+};
 
 pub const PAWNS_MOVES_CAPACITY: usize = 24;
 
@@ -46,11 +48,33 @@ static BLACK_PAWN_MOVES: [Bitboard; 56] = [
     0x10000000000, 0x20000000000, 0x40000000000, 0x80000000000, 0x100000000000, 0x200000000000, 0x400000000000, 0x800000000000,
 ];
 
-// Function to calculate pseudo-legal moves for white pawns
-fn white_pawns_pseudolegal_moves(cb: &Chessboard, pawns: Bitboard) -> Vec<Chessboard> {
+pub fn white_pawns_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(PAWNS_MOVES_CAPACITY);
 
-    let mut remaining_pawns = pawns;
+    // TODO: BENCHMARK THIS
+    // let en_passant_square = cb.get_en_passant_bitboard();
+    // if en_passant_square != 0 {
+    //     // Handle en passant captures separately
+    //     let mut remaining_pawns = pawns;
+    //     while remaining_pawns != 0 {
+    //         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+    //         let square = single_pawn.trailing_zeros() as usize;
+
+    //         // En passant capture
+    //         let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[square];
+    //         if en_passant_mask != 0 {
+    //             let new_position = cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
+    //             new_positions.push(new_position);
+    //         }
+
+    //         remaining_pawns &= remaining_pawns - 1;
+    //     }
+    // }
+    // // Handle all other moves
+
+    let en_passant_square = cb.get_en_passant_bitboard();
+
+    let mut remaining_pawns = cb.white_pawns;
     while remaining_pawns != 0 {
         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
         let square = single_pawn.trailing_zeros() as usize;
@@ -82,17 +106,27 @@ fn white_pawns_pseudolegal_moves(cb: &Chessboard, pawns: Bitboard) -> Vec<Chessb
             remaining_attacks &= remaining_attacks - 1;
         }
 
+        // En passant capture
+        if en_passant_square != 0 {
+            let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[square];
+            if en_passant_mask != 0 {
+                let new_position = cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                new_positions.push(new_position);
+            }
+        }
+
         remaining_pawns &= remaining_pawns - 1;
     }
 
     new_positions
 }
 
-// Similar function for black pawns
-fn black_pawns_pseudolegal_moves(cb: &Chessboard, pawns: Bitboard) -> Vec<Chessboard> {
+pub fn black_pawns_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let mut new_positions = Vec::with_capacity(PAWNS_MOVES_CAPACITY);
 
-    let mut remaining_pawns = pawns;
+    let en_passant_square = cb.get_en_passant_bitboard();
+
+    let mut remaining_pawns = cb.black_pawns;
     while remaining_pawns != 0 {
         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
         let square = single_pawn.trailing_zeros() as usize;
@@ -122,6 +156,15 @@ fn black_pawns_pseudolegal_moves(cb: &Chessboard, pawns: Bitboard) -> Vec<Chessb
             let new_position = cb.make_black_pawn_capture_move(single_pawn, single_attack);
             new_positions.push(new_position);
             remaining_attacks &= remaining_attacks - 1;
+        }
+
+        // En passant capture
+        if en_passant_square != 0 {
+            let en_passant_mask = en_passant_square & BLACK_PAWN_ATTACKS[square];
+            if en_passant_mask != 0 {
+                let new_position = cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                new_positions.push(new_position);
+            }
         }
 
         remaining_pawns &= remaining_pawns - 1;
