@@ -101,3 +101,53 @@ pub fn black_bishops_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     new_positions
 }
+
+pub fn white_bishops_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(BISHOPS_MOVES_CAPACITY);
+    let mut remaining_bishops = cb.white_bishops;
+
+    while remaining_bishops != 0 {
+        let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
+        let occupancy = cb.get_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) ^ cb.get_white_occupancy();
+
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_white_bishop_move(single_bishop_bitboard, single_attack_bitboard);
+            if !new_position.is_white_king_under_attack() {
+                new_positions.push(new_position);
+            }
+            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
+        }
+        
+        remaining_bishops &= remaining_bishops - 1; // Remove the least significant bishop
+    }
+
+    new_positions
+}
+
+pub fn black_bishops_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(BISHOPS_MOVES_CAPACITY);
+    let mut remaining_bishops = cb.black_bishops;
+
+    while remaining_bishops != 0 {
+        let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
+        let occupancy = cb.get_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) ^ cb.get_black_occupancy();
+
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_black_bishop_move(single_bishop_bitboard, single_attack_bitboard);
+            if !new_position.is_black_king_under_attack() {
+                new_positions.push(new_position);
+            }
+            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
+        }
+
+        remaining_bishops &= remaining_bishops - 1; // Remove the least significant bishop
+    }
+
+    new_positions
+}

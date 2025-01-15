@@ -39,7 +39,7 @@ pub fn single_rook_attacks(occupancy: u64, rook: u64) -> u64 {
     single_rook_rank_attacks(occupancy, rook) | single_rook_file_attacks(occupancy, rook)
 }
 
-pub fn all_rooks_attacks(occupancy: u64, rooks: u64) -> u64 {
+pub fn all_rooks_attacks(occupancy: Bitboard, rooks: Bitboard) -> Bitboard {
     let mut total_attacks = 0;
     let mut remaining_rooks = rooks;
 
@@ -114,6 +114,58 @@ pub fn black_rooks_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     new_positions
 }
+
+pub fn white_rooks_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+        let mut new_positions = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
+    let mut remaining_rooks = cb.white_rooks;
+
+    while remaining_rooks != 0 {
+        let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
+        let occupancy = cb.get_occupancy();
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) ^ cb.get_white_occupancy();
+
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
+            // let mov = Move::new(cb, Piece::Rook, single_rook_bitboard, single_attack_bitboard);
+            let new_position = cb.make_white_rook_move(single_rook_bitboard, single_attack_bitboard);
+            if !new_position.is_white_king_under_attack() {
+                new_positions.push(new_position);
+            }
+            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
+        }
+        
+        remaining_rooks &= remaining_rooks - 1; // Remove the least significant rook
+    }
+
+    new_positions
+}
+
+pub fn black_rooks_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
+    let mut remaining_rooks = cb.black_rooks;
+
+    while remaining_rooks != 0 {
+        let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
+        let occupancy = cb.get_occupancy();
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) ^ cb.get_black_occupancy();
+
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_black_rook_move(single_rook_bitboard, single_attack_bitboard);
+            if !new_position.is_black_king_under_attack() {
+                new_positions.push(new_position);
+            }
+            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
+        }
+
+        remaining_rooks &= remaining_rooks - 1; // Remove the least significant rook
+    }
+
+    new_positions
+}
+
 
 #[cfg(test)]
 mod tests {

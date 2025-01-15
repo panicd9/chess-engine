@@ -1,5 +1,7 @@
 use crate::chessboard::{
-    file_masks::{FILE_A, FILE_H}, rank_masks::{RANK_2, RANK_7}, Bitboard, Chessboard
+    file_masks::{FILE_A, FILE_H},
+    rank_masks::{RANK_2, RANK_7},
+    Bitboard, Chessboard,
 };
 
 pub const PAWNS_MOVES_CAPACITY: usize = 24;
@@ -38,7 +40,7 @@ static BLACK_PAWN_ATTACKS: [Bitboard; 56] = [
 ];
 
 #[rustfmt::skip]
-static BLACK_PAWN_MOVES: [Bitboard; 56] = [
+static BLACK_PAWN_FORWARD_MOVES: [Bitboard; 56] = [
     0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
     0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80,
     0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000,
@@ -110,7 +112,8 @@ pub fn white_pawns_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         if en_passant_square != 0 {
             let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[square];
             if en_passant_mask != 0 {
-                let new_position = cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                let new_position =
+                    cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
                 new_positions.push(new_position);
             }
         }
@@ -132,7 +135,7 @@ pub fn black_pawns_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         let square = single_pawn.trailing_zeros() as usize;
 
         // Forward moves
-        let forward = BLACK_PAWN_MOVES[square] & !cb.get_occupancy();
+        let forward = BLACK_PAWN_FORWARD_MOVES[square] & !cb.get_occupancy();
         if forward != 0 {
             let new_position = cb.make_black_pawn_forward_move(single_pawn, forward);
             new_positions.push(new_position);
@@ -162,8 +165,135 @@ pub fn black_pawns_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         if en_passant_square != 0 {
             let en_passant_mask = en_passant_square & BLACK_PAWN_ATTACKS[square];
             if en_passant_mask != 0 {
-                let new_position = cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                let new_position =
+                    cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
                 new_positions.push(new_position);
+            }
+        }
+
+        remaining_pawns &= remaining_pawns - 1;
+    }
+
+    new_positions
+}
+
+pub fn white_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(PAWNS_MOVES_CAPACITY);
+
+    let en_passant_square = cb.get_en_passant_bitboard();
+
+    let mut remaining_pawns = cb.white_pawns;
+    while remaining_pawns != 0 {
+        let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+        let square = single_pawn.trailing_zeros() as usize;
+
+        // Forward moves
+        let forward = WHITE_PAWN_FORWARD_MOVES[square] & !cb.get_occupancy();
+        if forward != 0 {
+            let new_position = cb.make_white_pawn_forward_move(single_pawn, forward);
+            // TODO: Can be optimized by checking if the king is under attack before changing side to move
+            if !new_position.is_white_king_under_attack() {
+                new_positions.push(new_position);
+            }
+
+            // Double forward move (only from the second rank)
+            if (single_pawn & RANK_2) != 0 {
+                let double_forward = (single_pawn << 16) & !cb.get_occupancy();
+                if double_forward != 0 {
+                    let new_double_position =
+                        cb.make_white_pawn_double_forward_move(single_pawn, double_forward);
+                    if !new_double_position.is_white_king_under_attack() {
+                        new_positions.push(new_double_position);
+                    }
+                }
+            }
+        }
+
+        // Attack moves
+        let attacks = WHITE_PAWN_ATTACKS[square] & cb.get_black_occupancy();
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_white_pawn_capture_move(single_pawn, single_attack);
+            if !new_position.is_white_king_under_attack() {
+                new_positions.push(new_position);
+            }
+
+            remaining_attacks &= remaining_attacks - 1;
+        }
+
+        // En passant capture
+        if en_passant_square != 0 {
+            let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[square];
+            if en_passant_mask != 0 {
+                let new_position =
+                    cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                if !new_position.is_white_king_under_attack() {
+                    new_positions.push(new_position);
+                }
+            }
+        }
+
+        remaining_pawns &= remaining_pawns - 1;
+    }
+
+    new_positions
+}
+
+pub fn black_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(PAWNS_MOVES_CAPACITY);
+
+    let en_passant_square = cb.get_en_passant_bitboard();
+
+    let mut remaining_pawns = cb.black_pawns;
+    while remaining_pawns != 0 {
+        let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+        let square = single_pawn.trailing_zeros() as usize;
+
+        // Forward moves
+        let forward = BLACK_PAWN_FORWARD_MOVES[square] & !cb.get_occupancy();
+        if forward != 0 {
+            let new_position = cb.make_black_pawn_forward_move(single_pawn, forward);
+            // TODO: Can be optimized by checking if the king is under attack before changing side to move
+            if !new_position.is_black_king_under_attack() {
+                new_positions.push(new_position);
+            }
+
+            // Double forward move (only from the seventh rank)
+            if (single_pawn & RANK_7) != 0 {
+                let double_forward = (single_pawn >> 16) & !cb.get_occupancy();
+                if double_forward != 0 {
+                    let new_double_position =
+                        cb.make_black_pawn_double_forward_move(single_pawn, double_forward);
+                    if !new_double_position.is_black_king_under_attack() {
+                        new_positions.push(new_double_position);
+                    }
+                }
+            }
+        }
+
+        // Attack moves
+        let attacks = BLACK_PAWN_ATTACKS[square] & cb.get_white_occupancy();
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_black_pawn_capture_move(single_pawn, single_attack);
+            if !new_position.is_black_king_under_attack() {
+                new_positions.push(new_position);
+            }
+
+            remaining_attacks &= remaining_attacks - 1;
+        }
+
+        // En passant capture
+        if en_passant_square != 0 {
+            let en_passant_mask = en_passant_square & BLACK_PAWN_ATTACKS[square];
+            if en_passant_mask != 0 {
+                let new_position =
+                    cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                if !new_position.is_black_king_under_attack() {
+                    new_positions.push(new_position);
+                }
             }
         }
 

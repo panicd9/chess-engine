@@ -73,3 +73,53 @@ pub fn black_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     new_positions
 }
+
+pub fn white_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
+    let mut remaining_knights = cb.white_knights;
+
+    while remaining_knights != 0 {
+        let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) ^ cb.get_white_occupancy();
+
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard);
+            if !new_position.is_white_king_under_attack() {
+                new_positions.push(new_position);
+            }
+
+            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
+        }
+        
+        remaining_knights &= remaining_knights - 1; // Remove the least significant knight
+    }
+
+    new_positions
+}
+
+pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+    let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
+    let mut remaining_knights = cb.black_knights;
+
+    while remaining_knights != 0 {
+        let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) ^ cb.get_black_occupancy();
+
+        let mut remaining_attacks = attacks;
+        while remaining_attacks != 0 {
+            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
+            let new_position = cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard);
+            if !new_position.is_black_king_under_attack() {
+                new_positions.push(new_position);
+            }
+
+            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
+        }
+
+        remaining_knights &= remaining_knights - 1; // Remove the least significant knight
+    }
+
+    new_positions
+}
