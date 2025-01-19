@@ -1,4 +1,4 @@
-use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, utils::{calculate_sliding_attacks, reverse_bits}};
+use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, display::display_board, utils::{calculate_sliding_attacks, reverse_bits}};
 
 // use super::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS};
 // use crate::r#move::Move;
@@ -6,7 +6,7 @@ use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, utils::{
 // use crate::utils::*;
 // use crate::display::*;
 
-const ROOKS_MOVES_CAPACITY: usize = 28;
+const ROOKS_MOVES_CAPACITY: usize = 15;
 
 // Generate rook attacks on a rank using Hyperbola Quintessence.
 fn single_rook_rank_attacks(occupancy: u64, rook: u64) -> u64 {
@@ -14,8 +14,8 @@ fn single_rook_rank_attacks(occupancy: u64, rook: u64) -> u64 {
     let mask = RANK_MASKS[rank];
     let rank_occupancy = occupancy & mask;
 
-    let mut forward = rank_occupancy.wrapping_sub(2 * rook);
-    let reverse = reverse_bits(rank_occupancy).wrapping_sub(2 * reverse_bits(rook));
+    let mut forward = rank_occupancy.wrapping_sub(rook.wrapping_mul(2));
+    let reverse = reverse_bits(rank_occupancy).wrapping_sub(reverse_bits(rook).wrapping_mul(2));
 
     forward ^= reverse_bits(reverse);
     forward & mask
@@ -27,8 +27,8 @@ fn single_rook_file_attacks(occupancy: u64, rook: u64) -> u64 {
     let mask = FILE_MASKS[file];
     let file_occupancy = occupancy & mask;
 
-    let mut forward = file_occupancy.wrapping_sub(2 * rook) ;
-    let reverse = reverse_bits(file_occupancy).wrapping_sub(2 * reverse_bits(rook));
+    let mut forward = file_occupancy.wrapping_sub(rook.wrapping_mul(2)) ;
+    let reverse = reverse_bits(file_occupancy).wrapping_sub(reverse_bits(rook).wrapping_mul(2));
 
     forward ^= reverse_bits(reverse);
     forward & mask
@@ -74,7 +74,7 @@ pub fn white_rooks_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
         let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) ^ cb.get_white_occupancy();
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & !cb.get_white_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -98,7 +98,7 @@ pub fn black_rooks_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
         let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) ^ cb.get_black_occupancy();
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & !cb.get_black_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -116,14 +116,14 @@ pub fn black_rooks_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 }
 
 pub fn white_rooks_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-        let mut new_positions = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
+    let mut new_positions = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
     let mut remaining_rooks = cb.white_rooks;
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
         let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) ^ cb.get_white_occupancy();
-
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & !cb.get_white_occupancy();
+        
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
@@ -148,8 +148,8 @@ pub fn black_rooks_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
         let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) ^ cb.get_black_occupancy();
-
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & !cb.get_black_occupancy();
+        
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();

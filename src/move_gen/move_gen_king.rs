@@ -1,6 +1,6 @@
-use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, Square}, utils::{BLACK_KING_CASTLE_SQUARES, BLACK_QUEEN_CASTLE_SQUARES, WHITE_KING_CASTLE_SQUARES, WHITE_QUEEN_CASTLE_SQUARES}};
+use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, Square}, display::display_board, utils::{BLACK_KING_CASTLE_SQUARES, BLACK_QUEEN_CASTLE_SQUARES, WHITE_KING_CASTLE_SQUARES, WHITE_QUEEN_CASTLE_SQUARES}};
 
-pub const KING_MOVES_CAPACITY: usize = 4;
+pub const KING_MOVES_CAPACITY: usize = 5;
 
 // Define the king move lookup table for each square on an 8x8 chessboard
 #[rustfmt::skip]
@@ -16,7 +16,7 @@ static KING_ATTACKS: [Bitboard; 64] = [
 ];
 
 // Function to get the king attacks for a given square
-#[inline(always)]
+// #[inline(always)]
 pub fn king_attacks_from_square(square: Square) -> Bitboard {
     // Return the pre-calculated attack pattern for the given square
     KING_ATTACKS[square]
@@ -36,7 +36,7 @@ pub fn white_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let occupancy = cb.get_occupancy();
 
     // Normal king moves
-    let attacks = king_attacks(king) ^ cb.get_white_occupancy();
+    let attacks = king_attacks(king) & !cb.get_white_occupancy();
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
@@ -77,7 +77,7 @@ pub fn black_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let occupancy = cb.get_occupancy();
 
     // Normal king moves
-    let attacks = king_attacks(king) ^ cb.get_black_occupancy();
+    let attacks = king_attacks(king) & !cb.get_black_occupancy();
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
@@ -119,7 +119,7 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let occupancy = cb.get_occupancy();
 
     // Normal king moves
-    let attacks = king_attacks(king) ^ cb.get_white_occupancy();
+    let attacks = king_attacks(king) & !cb.get_white_occupancy();
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
@@ -135,21 +135,26 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     if cb.white_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
         let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_SQUARES & occupancy == 0;
-        // TODO: No need to calculate all black attacks, we can use superpiece on castling squares instead
-        let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_SQUARES) != 0;
-        if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
-            let new_position = cb.make_white_kingside_castle();
-            new_positions.push(new_position);
+        if are_kingside_castle_squares_empty {
+            // Only calculate attacks if the squares are empty
+            let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_SQUARES) != 0;
+            if !are_kingside_castle_squares_attacked {
+                let new_position = cb.make_white_kingside_castle();
+                new_positions.push(new_position);
+            }
         }
     }
 
     if cb.white_can_castle_queen_side {
         // Queenside castling: ensure the squares between the king and rook are empty
         let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_SQUARES & occupancy == 0;
-        let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_SQUARES) != 0;
-        if are_queen_side_castle_squares_empty && !are_queenside_castle_squares_attacked {
-            let new_position = cb.make_white_queenside_castle();
-            new_positions.push(new_position);
+        if are_queen_side_castle_squares_empty {
+            // Only calculate attacks if the squares are empty
+            let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_SQUARES) != 0;
+            if !are_queenside_castle_squares_attacked {
+                let new_position = cb.make_white_queenside_castle();
+                new_positions.push(new_position);
+            }
         }
     }
 
@@ -162,7 +167,7 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     let occupancy = cb.get_occupancy();
 
     // Normal king moves
-    let attacks = king_attacks(king) ^ cb.get_black_occupancy();
+    let attacks = king_attacks(king) & !cb.get_black_occupancy();
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
@@ -178,22 +183,26 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     if cb.black_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
         let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_SQUARES & occupancy == 0;
-        let are_kingside_castle_squares_attacked =
-            (cb.all_white_attacks() & BLACK_KING_CASTLE_SQUARES) != 0;
-        if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
-            let new_position = cb.make_black_kingside_castle();
-            new_positions.push(new_position);
+        if are_kingside_castle_squares_empty {
+            // Only calculate attacks if the squares are empty
+            let are_kingside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_KING_CASTLE_SQUARES) != 0;
+            if !are_kingside_castle_squares_attacked {
+                let new_position = cb.make_black_kingside_castle();
+                new_positions.push(new_position);
+            }
         }
     }
 
     if cb.black_can_castle_queen_side {
         // Queenside castling: ensure the squares between the king and rook are empty
         let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_SQUARES & occupancy == 0;
-        let are_queenside_castle_squares_attacked =
-            (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_SQUARES) != 0;
-        if are_queenside_castle_squares_empty && !are_queenside_castle_squares_attacked {
-            let new_position = cb.make_black_queenside_castle();
-            new_positions.push(new_position);
+        if are_queenside_castle_squares_empty {
+            // Only calculate attacks if the squares are empty
+            let are_queenside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_SQUARES) != 0;
+            if !are_queenside_castle_squares_attacked {
+                let new_position = cb.make_black_queenside_castle();
+                new_positions.push(new_position);
+            }
         }
     }
 

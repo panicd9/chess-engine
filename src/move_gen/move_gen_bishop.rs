@@ -7,8 +7,8 @@ fn single_bishop_diagonal_attacks(occupancy: u64, bishop: u64) -> u64 {
     let mask = DIAGONAL_MASKS[bishop.trailing_zeros() as usize];
     let diagonal_occupancy = occupancy & mask;
 
-    let mut forward = diagonal_occupancy.wrapping_sub(2 * bishop);
-    let reverse = reverse_bits(diagonal_occupancy).wrapping_sub(2 * reverse_bits(bishop));
+    let mut forward = diagonal_occupancy.wrapping_sub(bishop.wrapping_mul(2));
+    let reverse = reverse_bits(diagonal_occupancy).wrapping_sub(reverse_bits(bishop).wrapping_mul(2));
 
     forward ^= reverse_bits(reverse);
     forward & mask
@@ -19,8 +19,8 @@ fn single_bishop_anti_diagonal_attacks(occupancy: u64, bishop: u64) -> u64 {
     let mask = ANTI_DIAGONAL_MASKS[bishop.trailing_zeros() as usize];
     let anti_diagonal_occupancy = occupancy & mask;
 
-    let mut forward = anti_diagonal_occupancy.wrapping_sub(2 * bishop);
-    let reverse = reverse_bits(anti_diagonal_occupancy).wrapping_sub(2 * reverse_bits(bishop));
+    let mut forward = anti_diagonal_occupancy.wrapping_sub(bishop.wrapping_mul(2));
+    let reverse = reverse_bits(anti_diagonal_occupancy).wrapping_sub(reverse_bits(bishop).wrapping_mul(2));
 
     forward ^= reverse_bits(reverse);
     forward & mask
@@ -63,7 +63,7 @@ pub fn white_bishops_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
         let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) ^ cb.get_white_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & !cb.get_white_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -86,7 +86,7 @@ pub fn black_bishops_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
         let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) ^ cb.get_black_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & !cb.get_black_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -109,7 +109,7 @@ pub fn white_bishops_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
         let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) ^ cb.get_white_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & !cb.get_white_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -134,7 +134,7 @@ pub fn black_bishops_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
         let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) ^ cb.get_black_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & !cb.get_black_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {

@@ -23,11 +23,12 @@ use core::net;
 use file_masks::{FILE_A, FILE_H};
 
 use crate::{
-    display,
+    display::{self, display_board},
     move_gen::{
         move_gen_bishop::{all_bishops_attacks, single_bishop_attacks},
         move_gen_king::king_attacks,
         move_gen_knight::knight_attacks_from_single_knight_bitboard,
+        move_gen_pawn::{single_black_pawn_attacks, single_white_pawn_attacks},
         move_gen_queen::{all_queens_attacks, single_queen_attacks},
         move_gen_rook::{all_rooks_attacks, single_rook_attacks},
     },
@@ -77,6 +78,12 @@ pub const WHITE_CASTLE_QUEENSIDE_ROOK_END_SQUARE: u64 = 0x8;
 pub const WHITE_CASTLE_KINGSIDE_ROOK_MASK: u64 = 0xa0;
 pub const WHITE_CASTLE_QUEENSIDE_ROOK_MASK: u64 = 0x9;
 
+pub const WHITE_KINGSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0xf0;
+pub const WHITE_QUEENSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0x1d;
+
+pub const BLACK_KINGSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0xf000000000000000;
+pub const BLACK_QUEENSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0x1d00000000000000;
+
 pub(crate) const BLACK_KING_START_SQUARE: u64 = 0x1000000000000000;
 pub(crate) const BLACK_QUEEN_CASTLE_SQURE: u64 = 0x0400000000000000;
 pub(crate) const BLACK_KING_CASTLE_SQUARE: u64 = 0x4000000000000000;
@@ -108,7 +115,8 @@ pub(crate) const FILE_MASKS: [u64; 8] = [
     0x8080808080808080,
 ];
 
-pub(crate) struct Chessboard {
+#[derive(Debug, Copy)]
+pub struct Chessboard {
     pub white_pawns: u64,
     pub black_pawns: u64,
     pub white_knights: u64,
@@ -124,11 +132,19 @@ pub(crate) struct Chessboard {
 
     pub en_passant: SingletonBitboard,
 
+    pub white_occupancy: u64,
+    pub black_occupancy: u64,
+    pub occupancy: u64,
+
     pub white_can_castle_king_side: bool,
     pub white_can_castle_queen_side: bool,
     pub black_can_castle_king_side: bool,
     pub black_can_castle_queen_side: bool,
     pub side_to_move: Color,
+
+    // New fields
+    pub halfmove_clock: u32, // Number of half-moves since the last pawn move or capture
+    pub fullmove_counter: u32, // Number of full moves in the game
 }
 
 impl Clone for Chessboard {
@@ -147,6 +163,10 @@ impl Clone for Chessboard {
             white_king: self.white_king,
             black_king: self.black_king,
 
+            white_occupancy: self.white_occupancy,
+            black_occupancy: self.black_occupancy,
+            occupancy: self.occupancy,
+
             en_passant: 0x0, // Clear en_passant
 
             white_can_castle_king_side: self.white_can_castle_king_side,
@@ -154,6 +174,9 @@ impl Clone for Chessboard {
             black_can_castle_king_side: self.black_can_castle_king_side,
             black_can_castle_queen_side: self.black_can_castle_queen_side,
             side_to_move: self.side_to_move,
+
+            halfmove_clock: self.halfmove_clock,
+            fullmove_counter: self.fullmove_counter,
         }
     }
 }
@@ -174,6 +197,10 @@ impl Chessboard {
             white_king: 0x0000000000000010,
             black_king: 0x1000000000000000,
 
+            white_occupancy: 0x000000000000FFFF,
+            black_occupancy: 0xFFFF000000000000,
+            occupancy: 0xFFFF00000000FFFF,
+
             en_passant: 0x0,
 
             white_can_castle_king_side: true,
@@ -181,6 +208,9 @@ impl Chessboard {
             black_can_castle_king_side: true,
             black_can_castle_queen_side: true,
             side_to_move: Color::White,
+
+            halfmove_clock: 0,
+            fullmove_counter: 1,
         }
     }
 
@@ -197,6 +227,8 @@ impl Chessboard {
             | self.black_queens
             | self.white_king
             | self.black_king
+
+        // self.white_occupancy | self.black_occupancy
     }
 
     pub fn get_white_occupancy(&self) -> u64 {
@@ -206,6 +238,8 @@ impl Chessboard {
             | self.white_rooks
             | self.white_queens
             | self.white_king
+
+        // self.white_occupancy
     }
 
     pub fn get_black_occupancy(&self) -> u64 {
@@ -215,23 +249,154 @@ impl Chessboard {
             | self.black_rooks
             | self.black_queens
             | self.black_king
+
+        // self.black_occupancy
     }
 
-    pub fn get_white_attacks(&self) -> Bitboard {
-        let white_pawn_attacks = self.white_pawns_attacks();
-        let white_knight_attacks = self.white_knights_attacks();
-        let white_rook_attacks = self.white_rooks_attacks();
-        let white_bishop_attacks = self.white_bishops_attacks();
-        let white_queen_attacks = self.white_queens_attacks();
-        let white_king_attacks = self.white_king_attacks();
+    pub fn from_fen(fen: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        if parts.len() != 6 {
+            return Err("Invalid FEN: FEN must have exactly 6 fields".to_string());
+        }
 
-        white_pawn_attacks
-            | white_knight_attacks
-            | white_bishop_attacks
-            | white_rook_attacks
-            | white_queen_attacks
-            | white_king_attacks
+        // Parse piece placement
+        let board = parts[0];
+        let mut white_pawns = 0u64;
+        let mut black_pawns = 0u64;
+        let mut white_knights = 0u64;
+        let mut black_knights = 0u64;
+        let mut white_bishops = 0u64;
+        let mut black_bishops = 0u64;
+        let mut white_rooks = 0u64;
+        let mut black_rooks = 0u64;
+        let mut white_queens = 0u64;
+        let mut black_queens = 0u64;
+        let mut white_king = 0u64;
+        let mut black_king = 0u64;
+
+        let mut rank = 7;
+        let mut file = 0;
+        for c in board.chars() {
+            match c {
+                'P' => white_pawns |= 1 << (rank * 8 + file),
+                'p' => black_pawns |= 1 << (rank * 8 + file),
+                'N' => white_knights |= 1 << (rank * 8 + file),
+                'n' => black_knights |= 1 << (rank * 8 + file),
+                'B' => white_bishops |= 1 << (rank * 8 + file),
+                'b' => black_bishops |= 1 << (rank * 8 + file),
+                'R' => white_rooks |= 1 << (rank * 8 + file),
+                'r' => black_rooks |= 1 << (rank * 8 + file),
+                'Q' => white_queens |= 1 << (rank * 8 + file),
+                'q' => black_queens |= 1 << (rank * 8 + file),
+                'K' => white_king |= 1 << (rank * 8 + file),
+                'k' => black_king |= 1 << (rank * 8 + file),
+                '/' => {
+                    rank -= 1;
+                    file = 0;
+                    continue;
+                }
+                '1'..='8' => {
+                    file += c.to_digit(10).unwrap() as usize;
+                    continue;
+                }
+                _ => return Err("Invalid character in FEN board".to_string()),
+            }
+            file += 1;
+        }
+
+        // Parse side to move
+        let side_to_move = match parts[1] {
+            "w" => Color::White,
+            "b" => Color::Black,
+            _ => return Err("Invalid side to move".to_string()),
+        };
+
+        // Parse castling rights
+        let mut white_can_castle_king_side = false;
+        let mut white_can_castle_queen_side = false;
+        let mut black_can_castle_king_side = false;
+        let mut black_can_castle_queen_side = false;
+
+        for c in parts[2].chars() {
+            match c {
+                'K' => white_can_castle_king_side = true,
+                'Q' => white_can_castle_queen_side = true,
+                'k' => black_can_castle_king_side = true,
+                'q' => black_can_castle_queen_side = true,
+                '-' => break,
+                _ => return Err("Invalid castling rights".to_string()),
+            }
+        }
+
+        // Parse en passant target square
+        let en_passant = if parts[3] != "-" {
+            let ep_file = parts[3].chars().next().unwrap() as u8 - b'a';
+            let ep_rank = parts[3].chars().nth(1).unwrap() as u8 - b'1';
+            1 << (ep_rank * 8 + ep_file)
+        } else {
+            0
+        };
+
+        // Parse halfmove clock
+        let halfmove_clock: u32 = parts[4]
+            .parse()
+            .map_err(|_| "Invalid halfmove clock".to_string())?;
+
+        // Parse fullmove counter
+        let fullmove_counter: u32 = parts[5]
+            .parse()
+            .map_err(|_| "Invalid fullmove counter".to_string())?;
+
+        let white_occupancy =
+            white_pawns | white_knights | white_bishops | white_rooks | white_queens | white_king;
+
+        let black_occupancy =
+            black_pawns | black_knights | black_bishops | black_rooks | black_queens | black_king;
+
+        let occupancy = white_occupancy | black_occupancy;
+
+        Ok(Self {
+            white_pawns,
+            black_pawns,
+            white_knights,
+            black_knights,
+            white_bishops,
+            black_bishops,
+            white_rooks,
+            black_rooks,
+            white_queens,
+            black_queens,
+            white_king,
+            black_king,
+            en_passant,
+            white_occupancy,
+            black_occupancy,
+            occupancy,
+            white_can_castle_king_side,
+            white_can_castle_queen_side,
+            black_can_castle_king_side,
+            black_can_castle_queen_side,
+            side_to_move,
+            halfmove_clock,
+            fullmove_counter,
+        })
     }
+
+    // pub fn get_white_attacks(&self) -> Bitboard {
+    //     let white_pawn_attacks = self.white_pawns_attacks();
+    //     let white_knight_attacks = self.white_knights_attacks();
+    //     let white_rook_attacks = self.white_rooks_attacks();
+    //     let white_bishop_attacks = self.white_bishops_attacks();
+    //     let white_queen_attacks = self.white_queens_attacks();
+    //     let white_king_attacks = self.white_king_attacks();
+
+    //     white_pawn_attacks
+    //         | white_knight_attacks
+    //         | white_bishop_attacks
+    //         | white_rook_attacks
+    //         | white_queen_attacks
+    //         | white_king_attacks
+    // }
 
     pub fn get_moving_color_occupancy(&self) -> u64 {
         match self.side_to_move {
@@ -252,7 +417,7 @@ impl Chessboard {
     }
 
     pub fn display_board_string(&self) -> String {
-        display::display_board_string(self, None)
+        display::display_board_string(self)
     }
 
     pub fn change_side_to_move(&mut self) {
@@ -269,6 +434,7 @@ impl Chessboard {
         self.black_rooks &= !target;
         self.black_queens &= !target;
         self.black_king &= !target;
+        self.black_occupancy &= !target;
     }
 
     pub fn capture_white_piece(&mut self, target: SingletonBitboard) {
@@ -278,6 +444,7 @@ impl Chessboard {
         self.white_rooks &= !target;
         self.white_queens &= !target;
         self.white_king &= !target;
+        self.white_occupancy &= !target;
     }
 
     pub fn make_white_rook_move(
@@ -287,9 +454,16 @@ impl Chessboard {
     ) -> Chessboard {
         let mut new_chessboard = self.clone();
 
+        // TODO: BENCHMARH THIS
+        // self.white_rooks ^= from | to;
+        // self.white_occupancy ^= from | to;
+
         // Move the rook
         new_chessboard.white_rooks &= !from;
         new_chessboard.white_rooks |= to;
+
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
 
         // Rooks is moved rarely from initial position so we can skip both checks frequently
         // TODO: BENCHMARK DIFFERENCE
@@ -322,6 +496,9 @@ impl Chessboard {
         new_chessboard.black_rooks &= !from;
         new_chessboard.black_rooks |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         // Rooks is moved rarely from initial position so we can skip both checks frequently
         if from & BLACK_ROOKS_MASK != 0 {
             if from == BLACK_ROOK_KINGSIDE {
@@ -348,6 +525,9 @@ impl Chessboard {
         new_chessboard.white_knights &= !from;
         new_chessboard.white_knights |= to;
 
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
+
         // Capture enemy piece if it exists
         let occupancy = self.get_black_occupancy();
         if occupancy & to != 0 {
@@ -369,6 +549,9 @@ impl Chessboard {
         new_chessboard.black_knights &= !from;
         new_chessboard.black_knights |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         // Capture enemy piece if it exists
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
@@ -389,6 +572,10 @@ impl Chessboard {
         // Move the king
         new_chessboard.white_king &= !from;
         new_chessboard.white_king |= to;
+
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
+
         new_chessboard.white_can_castle_king_side = false;
         new_chessboard.white_can_castle_queen_side = false;
 
@@ -408,6 +595,10 @@ impl Chessboard {
         // Move the king
         new_chessboard.black_king &= !from;
         new_chessboard.black_king |= to;
+
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         new_chessboard.black_can_castle_king_side = false;
         new_chessboard.black_can_castle_queen_side = false;
 
@@ -418,24 +609,26 @@ impl Chessboard {
         }
 
         new_chessboard.side_to_move = Color::White;
+
+        // display_board(&new_chessboard);
+        // println!("\n\n");
         new_chessboard
     }
 
-    pub(crate) fn make_white_bishop_move(
-        &self,
-        single_bishop_bitboard: u64,
-        single_attack_bitboard: u64,
-    ) -> Chessboard {
+    pub(crate) fn make_white_bishop_move(&self, from: u64, to: u64) -> Chessboard {
         let mut new_chessboard = self.clone();
 
         // Move the bishop
-        new_chessboard.white_bishops &= !single_bishop_bitboard;
-        new_chessboard.white_bishops |= single_attack_bitboard;
+        new_chessboard.white_bishops &= !from;
+        new_chessboard.white_bishops |= to;
+
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_black_occupancy();
-        if occupancy & single_attack_bitboard != 0 {
-            new_chessboard.capture_black_piece(single_attack_bitboard);
+        if occupancy & to != 0 {
+            new_chessboard.capture_black_piece(to);
         }
 
         new_chessboard.side_to_move = Color::Black;
@@ -452,6 +645,9 @@ impl Chessboard {
         // Move the bishop
         new_chessboard.black_bishops &= !from;
         new_chessboard.black_bishops |= to;
+
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_white_occupancy();
@@ -474,6 +670,9 @@ impl Chessboard {
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
 
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
+
         new_chessboard.side_to_move = Color::Black;
         new_chessboard
     }
@@ -489,6 +688,9 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         new_chessboard.side_to_move = Color::White;
         new_chessboard
     }
@@ -503,6 +705,9 @@ impl Chessboard {
         // Move the pawn
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
+
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
 
         new_chessboard.en_passant = to >> 8;
 
@@ -521,6 +726,9 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         new_chessboard.en_passant = to << 8;
 
         new_chessboard.side_to_move = Color::White;
@@ -537,6 +745,9 @@ impl Chessboard {
         // Move the pawn
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
+
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece
         new_chessboard.capture_black_piece(to);
@@ -556,11 +767,174 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         // Capture enemy piece
         new_chessboard.capture_white_piece(to);
 
         new_chessboard.side_to_move = Color::White;
         new_chessboard
+    }
+
+    pub fn make_all_white_pawn_promotion_moves(
+        &self,
+        from: SingletonBitboard,
+        to: SingletonBitboard,
+    ) -> [Chessboard; 4] {
+        let mut new_chessboards = [self.clone(); 4];
+
+        // Promote the pawn to a queen
+        new_chessboards[0].white_pawns &= !from;
+        new_chessboards[0].white_queens |= to;
+
+        new_chessboards[0].white_occupancy |= to;
+        new_chessboards[0].side_to_move = Color::Black;
+
+        // Promote the pawn to a knight
+        new_chessboards[1].white_pawns &= !from;
+        new_chessboards[1].white_knights |= to;
+
+        new_chessboards[1].white_occupancy |= to;
+        new_chessboards[1].side_to_move = Color::Black;
+
+        // Promote the pawn to a bishop
+        new_chessboards[2].white_pawns &= !from;
+        new_chessboards[2].white_bishops |= to;
+
+        new_chessboards[2].white_occupancy |= to;
+        new_chessboards[2].side_to_move = Color::Black;
+
+        // Promote the pawn to a rook
+        new_chessboards[3].white_pawns &= !from;
+        new_chessboards[3].white_rooks |= to;
+
+        new_chessboards[3].white_occupancy |= to;
+        new_chessboards[3].side_to_move = Color::Black;
+
+        new_chessboards
+    }
+
+    pub fn make_all_black_pawn_promotion_moves(
+        &self,
+        from: SingletonBitboard,
+        to: SingletonBitboard,
+    ) -> [Chessboard; 4] {
+        let mut new_chessboards = [Chessboard::new_initial_board(); 4];
+
+        // Promote the pawn to a queen
+        new_chessboards[0].black_pawns &= !from;
+        new_chessboards[0].black_queens |= to;
+
+        new_chessboards[0].black_occupancy |= to;
+        new_chessboards[0].side_to_move = Color::White;
+
+        // Promote the pawn to a knight
+        new_chessboards[1].black_pawns &= !from;
+        new_chessboards[1].black_knights |= to;
+
+        new_chessboards[1].black_occupancy |= to;
+        new_chessboards[1].side_to_move = Color::White;
+
+        // Promote the pawn to a bishop
+        new_chessboards[2].black_pawns &= !from;
+        new_chessboards[2].black_bishops |= to;
+
+        new_chessboards[2].black_occupancy |= to;
+        new_chessboards[2].side_to_move = Color::White;
+
+        // Promote the pawn to a rook
+        new_chessboards[3].black_pawns &= !from;
+        new_chessboards[3].black_rooks |= to;
+
+        new_chessboards[3].black_occupancy |= to;
+        new_chessboards[3].side_to_move = Color::White;
+
+        new_chessboards
+    }
+
+    pub fn make_all_white_pawn_capture_promotion_moves(
+        &self,
+        from: SingletonBitboard,
+        to: SingletonBitboard,
+    ) -> [Chessboard; 4] {
+        let mut new_chessboards = [Chessboard::new_initial_board(); 4];
+
+        // Promote the pawn to a queen
+        new_chessboards[0].white_pawns &= !from;
+        new_chessboards[0].white_queens |= to;
+
+        new_chessboards[0].white_occupancy |= to;
+        new_chessboards[0].capture_black_piece(to);
+        new_chessboards[0].side_to_move = Color::Black;
+
+        // Promote the pawn to a knight
+        new_chessboards[1].white_pawns &= !from;
+        new_chessboards[1].white_knights |= to;
+
+        new_chessboards[1].white_occupancy |= to;
+        new_chessboards[1].capture_black_piece(to);
+        new_chessboards[1].side_to_move = Color::Black;
+
+        // Promote the pawn to a bishop
+        new_chessboards[2].white_pawns &= !from;
+        new_chessboards[2].white_bishops |= to;
+
+        new_chessboards[2].white_occupancy |= to;
+        new_chessboards[2].capture_black_piece(to);
+        new_chessboards[2].side_to_move = Color::Black;
+
+        // Promote the pawn to a rook
+        new_chessboards[3].white_pawns &= !from;
+        new_chessboards[3].white_rooks |= to;
+
+        new_chessboards[3].white_occupancy |= to;
+        new_chessboards[3].capture_black_piece(to);
+        new_chessboards[3].side_to_move = Color::Black;
+
+        new_chessboards
+    }
+
+    pub fn make_all_black_pawn_capture_promotion_moves(
+        &self,
+        from: SingletonBitboard,
+        to: SingletonBitboard,
+    ) -> [Chessboard; 4] {
+        let mut new_chessboards = [Chessboard::new_initial_board(); 4];
+
+        // Promote the pawn to a queen
+        new_chessboards[0].black_pawns &= !from;
+        new_chessboards[0].black_queens |= to;
+
+        new_chessboards[0].black_occupancy |= to;
+        new_chessboards[0].capture_white_piece(to);
+        new_chessboards[0].side_to_move = Color::White;
+
+        // Promote the pawn to a knight
+        new_chessboards[1].black_pawns &= !from;
+        new_chessboards[1].black_knights |= to;
+
+        new_chessboards[1].black_occupancy |= to;
+        new_chessboards[1].capture_white_piece(to);
+        new_chessboards[1].side_to_move = Color::White;
+
+        // Promote the pawn to a bishop
+        new_chessboards[2].black_pawns &= !from;
+        new_chessboards[2].black_bishops |= to;
+
+        new_chessboards[2].black_occupancy |= to;
+        new_chessboards[2].capture_white_piece(to);
+        new_chessboards[2].side_to_move = Color::White;
+
+        // Promote the pawn to a rook
+        new_chessboards[3].black_pawns &= !from;
+        new_chessboards[3].black_rooks |= to;
+
+        new_chessboards[3].black_occupancy |= to;
+        new_chessboards[3].capture_white_piece(to);
+        new_chessboards[3].side_to_move = Color::White;
+
+        new_chessboards
     }
 
     pub fn make_white_queen_move(
@@ -573,6 +947,9 @@ impl Chessboard {
         // Move the queen
         new_chessboard.white_queens &= !from;
         new_chessboard.white_queens |= to;
+
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_black_occupancy();
@@ -595,6 +972,9 @@ impl Chessboard {
         new_chessboard.black_queens &= !from;
         new_chessboard.black_queens |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         // Capture enemy piece if it exists
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
@@ -616,8 +996,13 @@ impl Chessboard {
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
 
+        new_chessboard.white_occupancy &= !from;
+        new_chessboard.white_occupancy |= to;
+
         // Capture the black pawn
-        new_chessboard.black_pawns &= !(to >> 8);
+        let caputred_pawn: SingletonBitboard = to >> 8;
+        new_chessboard.black_pawns &= !caputred_pawn;
+        new_chessboard.black_occupancy &= !caputred_pawn;
 
         new_chessboard.side_to_move = Color::Black;
         new_chessboard
@@ -634,8 +1019,13 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
+        new_chessboard.black_occupancy &= !from;
+        new_chessboard.black_occupancy |= to;
+
         // Capture the white pawn
-        new_chessboard.white_pawns &= !(to << 8);
+        let caputred_pawn: SingletonBitboard = to >> 8;
+        new_chessboard.white_pawns &= !caputred_pawn;
+        new_chessboard.white_occupancy &= !caputred_pawn;
 
         new_chessboard.side_to_move = Color::White;
         new_chessboard
@@ -649,6 +1039,8 @@ impl Chessboard {
 
         // Move the rook
         new_chessboard.white_rooks ^= WHITE_CASTLE_KINGSIDE_ROOK_MASK;
+
+        new_chessboard.white_occupancy ^= WHITE_KINGSIDE_CASTLE_OCCUPANCY_MASK;
 
         new_chessboard.white_can_castle_king_side = false;
         new_chessboard.white_can_castle_queen_side = false;
@@ -666,6 +1058,8 @@ impl Chessboard {
         // Move the rook
         new_chessboard.black_rooks ^= BLACK_CASTLE_KINGSIDE_ROOK_MASK;
 
+        new_chessboard.black_occupancy ^= BLACK_KINGSIDE_CASTLE_OCCUPANCY_MASK;
+
         new_chessboard.black_can_castle_king_side = false;
         new_chessboard.black_can_castle_queen_side = false;
 
@@ -682,6 +1076,8 @@ impl Chessboard {
         // Move the rook
         new_chessboard.white_rooks ^= WHITE_CASTLE_QUEENSIDE_ROOK_MASK;
 
+        new_chessboard.white_occupancy ^= WHITE_QUEENSIDE_CASTLE_OCCUPANCY_MASK;
+
         new_chessboard.white_can_castle_king_side = false;
         new_chessboard.white_can_castle_queen_side = false;
 
@@ -697,6 +1093,8 @@ impl Chessboard {
 
         // Move the rook
         new_chessboard.black_rooks ^= BLACK_CASTLE_QUEENSIDE_ROOK_MASK;
+
+        new_chessboard.black_occupancy ^= BLACK_QUEENSIDE_CASTLE_OCCUPANCY_MASK;
 
         new_chessboard.black_can_castle_king_side = false;
         new_chessboard.black_can_castle_queen_side = false;
@@ -803,27 +1201,69 @@ impl Chessboard {
 
     pub fn is_white_king_under_attack(&self) -> bool {
         let white_king_bitboard = self.white_king;
-
         let occupancy = self.get_occupancy();
 
-        // TODO: Benchmark calculating rook and bishop attacks separately and exiting early if the king is attacked
-        let queen_direction = single_queen_attacks(occupancy, white_king_bitboard);
-        let knight_direction = knight_attacks_from_single_knight_bitboard(white_king_bitboard);
-        let all_attacks = queen_direction | knight_direction;
+        // Check for attacks from black bishops or queens (since they share similar attack patterns)
+        let bishop_direction = single_bishop_attacks(occupancy, white_king_bitboard);
+        if bishop_direction & (self.black_bishops | self.black_queens) != 0 {
+            return true;
+        }
 
-        white_king_bitboard & all_attacks != 0
+        // Check for attacks from black rooks or queens (since they share similar attack patterns)
+        let rook_direction = single_rook_attacks(occupancy, white_king_bitboard);
+        if rook_direction & (self.black_rooks | self.black_queens) != 0 {
+            return true;
+        }
+
+        // Check for attacks from black knights
+        let knight_direction = knight_attacks_from_single_knight_bitboard(white_king_bitboard);
+        if knight_direction & self.black_knights != 0 {
+            return true;
+        }
+
+        // Check for attacks from black pawns (note: black pawns attack diagonally downwards)
+        let pawn_direction = single_white_pawn_attacks(white_king_bitboard);
+        if pawn_direction & self.black_pawns != 0 {
+            return true;
+        }
+
+        // If no attack found, return false
+        false
     }
 
     pub fn is_black_king_under_attack(&self) -> bool {
         let black_king_bitboard = self.black_king;
-
         let occupancy = self.get_occupancy();
 
-        let queen_direction = single_queen_attacks(occupancy, black_king_bitboard);
-        let knight_direction = knight_attacks_from_single_knight_bitboard(black_king_bitboard);
-        let all_attacks = queen_direction | knight_direction;
+        // Check for attacks from white bishops or queens (since they share similar attack patterns)
+        if black_king_bitboard == 0 {
+            display_board(self);
+        }
+        let bishop_direction = single_bishop_attacks(occupancy, black_king_bitboard);
+        if bishop_direction & (self.white_bishops | self.white_queens) != 0 {
+            return true;
+        }
 
-        black_king_bitboard & all_attacks != 0
+        // Check for attacks from white rooks or queens (since they share similar attack patterns)
+        let rook_direction = single_rook_attacks(occupancy, black_king_bitboard);
+        if rook_direction & (self.white_rooks | self.white_queens) != 0 {
+            return true;
+        }
+
+        // Check for attacks from white knights
+        let knight_direction = knight_attacks_from_single_knight_bitboard(black_king_bitboard);
+        if knight_direction & self.white_knights != 0 {
+            return true;
+        }
+
+        // Check for attacks from white pawns (note: white pawns attack diagonally upwards)
+        let pawn_direction = single_black_pawn_attacks(black_king_bitboard);
+        if pawn_direction & self.white_pawns != 0 {
+            return true;
+        }
+
+        // If no attack found, return false
+        false
     }
 }
 

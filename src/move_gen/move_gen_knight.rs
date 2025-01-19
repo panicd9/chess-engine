@@ -1,6 +1,6 @@
 use crate::chessboard::{Bitboard, Chessboard, Square};
 
-pub const KNIGHTS_MOVES_CAPACITY: usize = 16;
+pub const KNIGHTS_MOVES_CAPACITY: usize = 10;
 
 // Define the knight move lookup table for each square on an 8x8 chessboard
 #[rustfmt::skip]
@@ -16,7 +16,7 @@ static KNIGHT_ATTACKS: [Bitboard; 64] = [
 ];
 
 // Function to get the knight attacks for a given square
-#[inline(always)]
+// #[inline(always)]
 fn knight_attacks(square: Square) -> Bitboard {
     // Return the pre-calculated attack pattern for the given square
     KNIGHT_ATTACKS[square]
@@ -36,7 +36,7 @@ pub fn white_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) ^ cb.get_white_occupancy();
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_white_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -58,7 +58,7 @@ pub fn black_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) ^ cb.get_black_occupancy();
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_black_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -80,8 +80,7 @@ pub fn white_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) ^ cb.get_white_occupancy();
-
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_white_occupancy();
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
@@ -105,7 +104,7 @@ pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) ^ cb.get_black_occupancy();
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_black_occupancy();
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {

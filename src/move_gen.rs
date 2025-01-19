@@ -76,7 +76,7 @@ pub fn black_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 }
 
 pub fn white_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(30);
+    let mut new_positions = Vec::with_capacity(40);
 
     new_positions.append(&mut white_pawns_legal_moves(cb));
     new_positions.append(&mut white_knights_legal_moves(cb));
@@ -89,7 +89,7 @@ pub fn white_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 }
 
 pub fn black_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(30);
+    let mut new_positions = Vec::with_capacity(40);
 
     new_positions.append(&mut black_pawns_legal_moves(cb));
     new_positions.append(&mut black_knights_legal_moves(cb));
