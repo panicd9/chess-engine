@@ -32,7 +32,10 @@ use crate::{
         move_gen_queen::{all_queens_attacks, single_queen_attacks},
         move_gen_rook::{all_rooks_attacks, single_rook_attacks},
     },
-    utils::{BLACK_ROOKS_MASK, BLACK_ROOK_KINGSIDE, WHITE_ROOKS_MASK, WHITE_ROOK_KINGSIDE},
+    utils::{
+        BLACK_KINGSIDE_ROOK, BLACK_QUEENSIDE_ROOK, BLACK_ROOKS_MASK, BLACK_ROOK_KINGSIDE,
+        WHITE_KINGSIDE_ROOK, WHITE_QUEENSIDE_ROOK, WHITE_ROOKS_MASK, WHITE_ROOK_KINGSIDE,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,10 +85,10 @@ pub const WHITE_KINGSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0xf0;
 pub const WHITE_QUEENSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0x1d;
 
 pub const BLACK_KINGSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0xf000000000000000;
-pub const BLACK_QUEENSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0x1d00000000000000;
+pub const BLACK_QUEENSIDE_CASTLE_OCCUPANCY_MASK: u64 = 0xd00000000000000;
 
 pub(crate) const BLACK_KING_START_SQUARE: u64 = 0x1000000000000000;
-pub(crate) const BLACK_QUEEN_CASTLE_SQURE: u64 = 0x0400000000000000;
+pub(crate) const BLACK_QUEEN_CASTLE_END_SQUARE: u64 = 0x0400000000000000;
 pub(crate) const BLACK_KING_CASTLE_SQUARE: u64 = 0x4000000000000000;
 pub const BLACK_CASTLE_KINGSIDE_ROOK_END_SQUARE: u64 = 0x2000000000000000;
 pub const BLACK_CASTLE_QUEENSIDE_ROOK_END_SQUARE: u64 = 0x800000000000000;
@@ -115,7 +118,7 @@ pub(crate) const FILE_MASKS: [u64; 8] = [
     0x8080808080808080,
 ];
 
-#[derive(Debug, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub struct Chessboard {
     pub white_pawns: u64,
     pub black_pawns: u64,
@@ -145,40 +148,6 @@ pub struct Chessboard {
     // New fields
     pub halfmove_clock: u32, // Number of half-moves since the last pawn move or capture
     pub fullmove_counter: u32, // Number of full moves in the game
-}
-
-impl Clone for Chessboard {
-    fn clone(&self) -> Self {
-        Chessboard {
-            white_pawns: self.white_pawns,
-            black_pawns: self.black_pawns,
-            white_knights: self.white_knights,
-            black_knights: self.black_knights,
-            white_bishops: self.white_bishops,
-            black_bishops: self.black_bishops,
-            white_rooks: self.white_rooks,
-            black_rooks: self.black_rooks,
-            white_queens: self.white_queens,
-            black_queens: self.black_queens,
-            white_king: self.white_king,
-            black_king: self.black_king,
-
-            white_occupancy: self.white_occupancy,
-            black_occupancy: self.black_occupancy,
-            occupancy: self.occupancy,
-
-            en_passant: 0x0, // Clear en_passant
-
-            white_can_castle_king_side: self.white_can_castle_king_side,
-            white_can_castle_queen_side: self.white_can_castle_queen_side,
-            black_can_castle_king_side: self.black_can_castle_king_side,
-            black_can_castle_queen_side: self.black_can_castle_queen_side,
-            side_to_move: self.side_to_move,
-
-            halfmove_clock: self.halfmove_clock,
-            fullmove_counter: self.fullmove_counter,
-        }
-    }
 }
 
 impl Chessboard {
@@ -212,6 +181,12 @@ impl Chessboard {
             halfmove_clock: 0,
             fullmove_counter: 1,
         }
+    }
+
+    pub fn clone_and_clear_en_passant(&self) -> Self {
+        let mut cloned = self.clone(); // Default Clone implementation
+        cloned.en_passant = 0; // Clear the en_passant field
+        cloned
     }
 
     pub fn get_occupancy(&self) -> u64 {
@@ -382,6 +357,18 @@ impl Chessboard {
         })
     }
 
+    // pub fn make_move(&self, from: Square, to: Square) -> Self {
+    //     let mut new_chessboard = self.clone_and_clear_en_passant();
+
+    //     match self.side_to_move {
+    //         Color::White => {
+
+    //         },
+    //         Color::Black => todo!(),
+    //     }
+
+    // }
+
     // pub fn get_white_attacks(&self) -> Bitboard {
     //     let white_pawn_attacks = self.white_pawns_attacks();
     //     let white_knight_attacks = self.white_knights_attacks();
@@ -427,16 +414,6 @@ impl Chessboard {
         }
     }
 
-    pub fn capture_black_piece(&mut self, target: SingletonBitboard) {
-        self.black_pawns &= !target;
-        self.black_knights &= !target;
-        self.black_bishops &= !target;
-        self.black_rooks &= !target;
-        self.black_queens &= !target;
-        self.black_king &= !target;
-        self.black_occupancy &= !target;
-    }
-
     pub fn capture_white_piece(&mut self, target: SingletonBitboard) {
         self.white_pawns &= !target;
         self.white_knights &= !target;
@@ -445,6 +422,34 @@ impl Chessboard {
         self.white_queens &= !target;
         self.white_king &= !target;
         self.white_occupancy &= !target;
+
+        self.halfmove_clock = 0;
+
+        // Handle castling rights for the corresponding rook
+        if target == WHITE_KINGSIDE_ROOK {
+            self.white_can_castle_king_side = false;
+        } else if target == WHITE_QUEENSIDE_ROOK {
+            self.white_can_castle_queen_side = false;
+        }
+    }
+    
+    pub fn capture_black_piece(&mut self, target: SingletonBitboard) {
+        self.black_pawns &= !target;
+        self.black_knights &= !target;
+        self.black_bishops &= !target;
+        self.black_rooks &= !target;
+        self.black_queens &= !target;
+        self.black_king &= !target;
+        self.black_occupancy &= !target;
+
+        self.halfmove_clock = 0;
+
+        // Handle castling rights for the corresponding rook
+        if target == BLACK_KINGSIDE_ROOK {
+            self.black_can_castle_king_side = false;
+        } else if target == BLACK_QUEENSIDE_ROOK {
+            self.black_can_castle_queen_side = false;
+        }
     }
 
     pub fn make_white_rook_move(
@@ -452,7 +457,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // TODO: BENCHMARH THIS
         // self.white_rooks ^= from | to;
@@ -479,9 +484,12 @@ impl Chessboard {
         let occupancy = self.get_black_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_black_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::Black;
+
         new_chessboard
     }
 
@@ -490,7 +498,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the rook
         new_chessboard.black_rooks &= !from;
@@ -512,14 +520,18 @@ impl Chessboard {
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_white_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.fullmove_counter += 1;
+
         new_chessboard
     }
 
     pub(crate) fn make_white_knight_move(&self, from: u64, to: u64) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the knight
         new_chessboard.white_knights &= !from;
@@ -532,6 +544,8 @@ impl Chessboard {
         let occupancy = self.get_black_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_black_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::Black;
@@ -543,7 +557,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the knight
         new_chessboard.black_knights &= !from;
@@ -556,9 +570,13 @@ impl Chessboard {
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_white_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.fullmove_counter += 1;
+
         new_chessboard
     }
 
@@ -567,7 +585,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the king
         new_chessboard.white_king &= !from;
@@ -583,6 +601,8 @@ impl Chessboard {
         let occupancy = self.get_black_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_black_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::Black;
@@ -590,7 +610,7 @@ impl Chessboard {
     }
 
     pub(crate) fn make_black_king_move(&self, from: u64, to: u64) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the king
         new_chessboard.black_king &= !from;
@@ -606,17 +626,18 @@ impl Chessboard {
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_white_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.fullmove_counter += 1;
 
-        // display_board(&new_chessboard);
-        // println!("\n\n");
         new_chessboard
     }
 
     pub(crate) fn make_white_bishop_move(&self, from: u64, to: u64) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the bishop
         new_chessboard.white_bishops &= !from;
@@ -629,9 +650,12 @@ impl Chessboard {
         let occupancy = self.get_black_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_black_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::Black;
+
         new_chessboard
     }
 
@@ -640,7 +664,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the bishop
         new_chessboard.black_bishops &= !from;
@@ -653,9 +677,13 @@ impl Chessboard {
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_white_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.fullmove_counter += 1;
+
         new_chessboard
     }
 
@@ -664,7 +692,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.white_pawns &= !from;
@@ -674,6 +702,8 @@ impl Chessboard {
         new_chessboard.white_occupancy |= to;
 
         new_chessboard.side_to_move = Color::Black;
+        new_chessboard.halfmove_clock = 0;
+
         new_chessboard
     }
 
@@ -682,7 +712,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.black_pawns &= !from;
@@ -692,6 +722,9 @@ impl Chessboard {
         new_chessboard.black_occupancy |= to;
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.halfmove_clock = 0;
+        new_chessboard.fullmove_counter += 1;
+
         new_chessboard
     }
 
@@ -700,7 +733,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.white_pawns &= !from;
@@ -712,6 +745,8 @@ impl Chessboard {
         new_chessboard.en_passant = to >> 8;
 
         new_chessboard.side_to_move = Color::Black;
+        new_chessboard.halfmove_clock = 0;
+
         new_chessboard
     }
 
@@ -720,7 +755,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.black_pawns &= !from;
@@ -732,6 +767,9 @@ impl Chessboard {
         new_chessboard.en_passant = to << 8;
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.halfmove_clock = 0;
+        new_chessboard.fullmove_counter += 1;
+
         new_chessboard
     }
 
@@ -740,7 +778,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.white_pawns &= !from;
@@ -753,6 +791,7 @@ impl Chessboard {
         new_chessboard.capture_black_piece(to);
 
         new_chessboard.side_to_move = Color::Black;
+
         new_chessboard
     }
 
@@ -761,7 +800,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.black_pawns &= !from;
@@ -774,6 +813,8 @@ impl Chessboard {
         new_chessboard.capture_white_piece(to);
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.fullmove_counter += 1;
+
         new_chessboard
     }
 
@@ -782,7 +823,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> [Chessboard; 4] {
-        let mut new_chessboards = [self.clone(); 4];
+        let mut new_chessboards = [self.clone_and_clear_en_passant(); 4];
 
         // Promote the pawn to a queen
         new_chessboards[0].white_pawns &= !from;
@@ -790,6 +831,7 @@ impl Chessboard {
 
         new_chessboards[0].white_occupancy |= to;
         new_chessboards[0].side_to_move = Color::Black;
+        new_chessboards[0].halfmove_clock = 0;
 
         // Promote the pawn to a knight
         new_chessboards[1].white_pawns &= !from;
@@ -797,6 +839,7 @@ impl Chessboard {
 
         new_chessboards[1].white_occupancy |= to;
         new_chessboards[1].side_to_move = Color::Black;
+        new_chessboards[1].halfmove_clock = 0;
 
         // Promote the pawn to a bishop
         new_chessboards[2].white_pawns &= !from;
@@ -804,6 +847,7 @@ impl Chessboard {
 
         new_chessboards[2].white_occupancy |= to;
         new_chessboards[2].side_to_move = Color::Black;
+        new_chessboards[2].halfmove_clock = 0;
 
         // Promote the pawn to a rook
         new_chessboards[3].white_pawns &= !from;
@@ -811,6 +855,7 @@ impl Chessboard {
 
         new_chessboards[3].white_occupancy |= to;
         new_chessboards[3].side_to_move = Color::Black;
+        new_chessboards[3].halfmove_clock = 0;
 
         new_chessboards
     }
@@ -820,7 +865,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> [Chessboard; 4] {
-        let mut new_chessboards = [Chessboard::new_initial_board(); 4];
+        let mut new_chessboards = [Chessboard::clone_and_clear_en_passant(&self); 4];
 
         // Promote the pawn to a queen
         new_chessboards[0].black_pawns &= !from;
@@ -828,6 +873,8 @@ impl Chessboard {
 
         new_chessboards[0].black_occupancy |= to;
         new_chessboards[0].side_to_move = Color::White;
+        new_chessboards[0].halfmove_clock = 0;
+        new_chessboards[0].fullmove_counter += 1;
 
         // Promote the pawn to a knight
         new_chessboards[1].black_pawns &= !from;
@@ -835,6 +882,8 @@ impl Chessboard {
 
         new_chessboards[1].black_occupancy |= to;
         new_chessboards[1].side_to_move = Color::White;
+        new_chessboards[1].halfmove_clock = 0;
+        new_chessboards[1].fullmove_counter += 1;
 
         // Promote the pawn to a bishop
         new_chessboards[2].black_pawns &= !from;
@@ -842,6 +891,8 @@ impl Chessboard {
 
         new_chessboards[2].black_occupancy |= to;
         new_chessboards[2].side_to_move = Color::White;
+        new_chessboards[2].halfmove_clock = 0;
+        new_chessboards[2].fullmove_counter += 1;
 
         // Promote the pawn to a rook
         new_chessboards[3].black_pawns &= !from;
@@ -849,6 +900,8 @@ impl Chessboard {
 
         new_chessboards[3].black_occupancy |= to;
         new_chessboards[3].side_to_move = Color::White;
+        new_chessboards[3].halfmove_clock = 0;
+        new_chessboards[3].fullmove_counter += 1;
 
         new_chessboards
     }
@@ -858,7 +911,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> [Chessboard; 4] {
-        let mut new_chessboards = [Chessboard::new_initial_board(); 4];
+        let mut new_chessboards = [Chessboard::clone_and_clear_en_passant(self); 4];
 
         // Promote the pawn to a queen
         new_chessboards[0].white_pawns &= !from;
@@ -900,7 +953,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> [Chessboard; 4] {
-        let mut new_chessboards = [Chessboard::new_initial_board(); 4];
+        let mut new_chessboards = [Chessboard::clone_and_clear_en_passant(self); 4];
 
         // Promote the pawn to a queen
         new_chessboards[0].black_pawns &= !from;
@@ -909,6 +962,7 @@ impl Chessboard {
         new_chessboards[0].black_occupancy |= to;
         new_chessboards[0].capture_white_piece(to);
         new_chessboards[0].side_to_move = Color::White;
+        new_chessboards[0].fullmove_counter += 1;
 
         // Promote the pawn to a knight
         new_chessboards[1].black_pawns &= !from;
@@ -917,6 +971,7 @@ impl Chessboard {
         new_chessboards[1].black_occupancy |= to;
         new_chessboards[1].capture_white_piece(to);
         new_chessboards[1].side_to_move = Color::White;
+        new_chessboards[1].fullmove_counter += 1;
 
         // Promote the pawn to a bishop
         new_chessboards[2].black_pawns &= !from;
@@ -925,6 +980,7 @@ impl Chessboard {
         new_chessboards[2].black_occupancy |= to;
         new_chessboards[2].capture_white_piece(to);
         new_chessboards[2].side_to_move = Color::White;
+        new_chessboards[2].fullmove_counter += 1;
 
         // Promote the pawn to a rook
         new_chessboards[3].black_pawns &= !from;
@@ -933,6 +989,7 @@ impl Chessboard {
         new_chessboards[3].black_occupancy |= to;
         new_chessboards[3].capture_white_piece(to);
         new_chessboards[3].side_to_move = Color::White;
+        new_chessboards[3].fullmove_counter += 1;
 
         new_chessboards
     }
@@ -942,7 +999,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the queen
         new_chessboard.white_queens &= !from;
@@ -955,6 +1012,8 @@ impl Chessboard {
         let occupancy = self.get_black_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_black_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::Black;
@@ -966,7 +1025,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the queen
         new_chessboard.black_queens &= !from;
@@ -979,9 +1038,12 @@ impl Chessboard {
         let occupancy = self.get_white_occupancy();
         if occupancy & to != 0 {
             new_chessboard.capture_white_piece(to);
+        } else {
+            new_chessboard.halfmove_clock += 1;
         }
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.fullmove_counter += 1;
         new_chessboard
     }
 
@@ -990,7 +1052,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.white_pawns &= !from;
@@ -1005,6 +1067,7 @@ impl Chessboard {
         new_chessboard.black_occupancy &= !caputred_pawn;
 
         new_chessboard.side_to_move = Color::Black;
+        new_chessboard.halfmove_clock = 0;
         new_chessboard
     }
 
@@ -1013,7 +1076,7 @@ impl Chessboard {
         from: SingletonBitboard,
         to: SingletonBitboard,
     ) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the pawn
         new_chessboard.black_pawns &= !from;
@@ -1023,16 +1086,18 @@ impl Chessboard {
         new_chessboard.black_occupancy |= to;
 
         // Capture the white pawn
-        let caputred_pawn: SingletonBitboard = to >> 8;
+        let caputred_pawn: SingletonBitboard = to << 8;
         new_chessboard.white_pawns &= !caputred_pawn;
         new_chessboard.white_occupancy &= !caputred_pawn;
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.halfmove_clock = 0;
+        new_chessboard.fullmove_counter += 1;
         new_chessboard
     }
 
     pub fn make_white_kingside_castle(&self) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the king
         new_chessboard.white_king = WHITE_KING_CASTLE_SQUARE;
@@ -1046,11 +1111,12 @@ impl Chessboard {
         new_chessboard.white_can_castle_queen_side = false;
 
         new_chessboard.side_to_move = Color::Black;
+        new_chessboard.halfmove_clock += 1;
         new_chessboard
     }
 
     pub fn make_black_kingside_castle(&self) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the king
         new_chessboard.black_king = BLACK_KING_CASTLE_SQUARE;
@@ -1064,11 +1130,13 @@ impl Chessboard {
         new_chessboard.black_can_castle_queen_side = false;
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.halfmove_clock += 1;
+        new_chessboard.fullmove_counter += 1;
         new_chessboard
     }
 
     pub fn make_white_queenside_castle(&self) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the king
         new_chessboard.white_king = WHITE_QUEEN_CASTLE_SQUARE;
@@ -1082,14 +1150,15 @@ impl Chessboard {
         new_chessboard.white_can_castle_queen_side = false;
 
         new_chessboard.side_to_move = Color::Black;
+        new_chessboard.halfmove_clock += 1;
         new_chessboard
     }
 
     pub fn make_black_queenside_castle(&self) -> Chessboard {
-        let mut new_chessboard = self.clone();
+        let mut new_chessboard = self.clone_and_clear_en_passant();
 
         // Move the king
-        new_chessboard.black_king = BLACK_QUEEN_CASTLE_SQURE;
+        new_chessboard.black_king = BLACK_QUEEN_CASTLE_END_SQUARE;
 
         // Move the rook
         new_chessboard.black_rooks ^= BLACK_CASTLE_QUEENSIDE_ROOK_MASK;
@@ -1100,6 +1169,8 @@ impl Chessboard {
         new_chessboard.black_can_castle_queen_side = false;
 
         new_chessboard.side_to_move = Color::White;
+        new_chessboard.halfmove_clock += 1;
+        new_chessboard.fullmove_counter += 1;
         new_chessboard
     }
 }

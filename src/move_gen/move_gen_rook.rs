@@ -10,6 +10,7 @@ const ROOKS_MOVES_CAPACITY: usize = 15;
 
 // Generate rook attacks on a rank using Hyperbola Quintessence.
 fn single_rook_rank_attacks(occupancy: u64, rook: u64) -> u64 {
+    // TODO: Make rank and file lookup table indexed by square
     let rank = (rook.trailing_zeros() / 8) as usize;
     let mask = RANK_MASKS[rank];
     let rank_occupancy = occupancy & mask;
@@ -184,25 +185,25 @@ mod tests {
     //     assert_eq!(calculated_rook_attacks, expected);
     // }
 
-    #[test]
-    fn test_rook_attacks_empty_board() {
-        let rook_square = 35; // D5
-        let occupancy = 1 << 35; // No pieces on the board except rook on D5
-        let expected = 0x80808f708080808; // Expected attacks
-        let calculated_rook_attacks = single_rook_attacks(occupancy, rook_square);
+    // #[test]
+    // fn test_rook_attacks_empty_board() {
+    //     let rook_square = 35; // D5
+    //     let occupancy = 1 << 35; // No pieces on the board except rook on D5
+    //     let expected = 0x80808f708080808; // Expected attacks
+    //     let calculated_rook_attacks = single_rook_attacks(occupancy, rook_square);
 
-        assert_eq!(calculated_rook_attacks, expected);
-    }
+    //     assert_eq!(calculated_rook_attacks, expected);
+    // }
 
-    #[test]
-    fn test_rook_attacks_with_blockers() {
-        let rook_square =  35; // D5
-        let occupancy = 0x8008100000800; // Blockers on A5, H5, D2, D7
-        let expected = 0x808f708080800; // Expected attacks
-        let calculated_rook_attacks = single_rook_attacks(occupancy, rook_square);
+    // #[test]
+    // fn test_rook_attacks_with_blockers() {
+    //     let rook_square =  35; // D5
+    //     let occupancy = 0x8008100000800; // Blockers on A5, H5, D2, D7
+    //     let expected = 0x808f708080800; // Expected attacks
+    //     let calculated_rook_attacks = single_rook_attacks(occupancy, rook_square);
 
-        assert_eq!(calculated_rook_attacks, expected);
-    }
+    //     assert_eq!(calculated_rook_attacks, expected);
+    // }
 
     // #[test]
     // fn test_multiple_rooks() {

@@ -7,3 +7,4 @@ pub mod display;
 pub mod search;
 pub mod perft;
 pub mod eval;
+pub mod squares;

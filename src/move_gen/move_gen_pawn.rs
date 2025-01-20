@@ -14,7 +14,7 @@ static WHITE_PAWN_ATTACKS: [Bitboard; 64] = [
     0x200000000, 0x500000000, 0xa00000000, 0x1400000000, 0x2800000000, 0x5000000000, 0xa000000000, 0x4000000000,
     0x20000000000, 0x50000000000, 0xa0000000000, 0x140000000000, 0x280000000000, 0x500000000000, 0xa00000000000, 0x400000000000,
     0x2000000000000, 0x5000000000000, 0xa000000000000, 0x14000000000000, 0x28000000000000, 0x50000000000000, 0xa0000000000000, 0x40000000000000,
-    0x200000000000000, 0x500000000000000, 0xa000000000000000, 0x1400000000000000, 0x2800000000000000, 0x5000000000000000, 0xa000000000000000, 0x4000000000000000,
+    0x200000000000000, 0x500000000000000, 0xa00000000000000, 0x1400000000000000, 0x2800000000000000, 0x5000000000000000, 0xa000000000000000, 0x4000000000000000,
     0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
 ];
 
@@ -221,7 +221,6 @@ pub fn white_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
                 }
                 // Promotion
             } else {
-                println!("PROMOTION");
                 let new_promotion_positions =
                     cb.make_all_white_pawn_promotion_moves(single_pawn, forward);
                 for new_position in new_promotion_positions {
@@ -243,7 +242,6 @@ pub fn white_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
                     new_positions.push(new_position);
                 }
             } else {
-                println!("PROMOTION");
                 let new_promotion_positions =
                     cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack);
                 for new_position in new_promotion_positions {
@@ -269,6 +267,7 @@ pub fn white_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         }
 
         remaining_pawns &= remaining_pawns - 1;
+        // println!("remaining pawns: {}", remaining_pawns);
     }
     new_positions
 }
@@ -307,7 +306,6 @@ pub fn black_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
                 }
             } else {
                 // Promotion
-                println!("PROMOTION");
                 let new_promotion_positions =
                     cb.make_all_black_pawn_promotion_moves(single_pawn, forward);
                 for new_position in new_promotion_positions {
@@ -330,7 +328,6 @@ pub fn black_pawns_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
                 }
             } else {
                 // Capture promotion
-                println!("PROMOTION");
                 let new_promotion_positions =
                     cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack);
                 for new_position in new_promotion_positions {

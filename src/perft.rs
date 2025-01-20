@@ -1,21 +1,23 @@
-use crate::chessboard::Chessboard;
+use crate::chessboard::{Chessboard, Color};
 use crate::display::{self, display_bitboard, display_board};
 use crate::move_gen::{black_legal_moves, white_legal_moves};
 
-pub fn perft(cb: &Chessboard, depth: u32, is_white_turn: bool) -> u64 {
+pub fn perft(cb: &Chessboard, depth: u32) -> u64 {
+    // println!("Depth: {}", depth);
     if depth == 0 {
         return 1;
     }
 
     let mut nodes = 0;
-    let legal_positions = if is_white_turn {
+    let legal_positions = if cb.side_to_move == Color::White {
         white_legal_moves(cb)
     } else {
         black_legal_moves(cb)
     };
 
     for pos in legal_positions {
-        nodes += perft(&pos, depth - 1, !is_white_turn);
+        nodes += perft(&pos, depth - 1);
+        // display_board(&pos);
     }
 
     nodes
@@ -73,13 +75,13 @@ fn compare_boards(before: &Chessboard, after: &Chessboard) -> Option<(usize, usi
 }
 
 /// Perft divide function that prints the move and the corresponding perft count for each move.
-pub fn perft_divide(cb: &Chessboard, depth: u32, is_white_turn: bool) {
+pub fn perft_divide(cb: &Chessboard, depth: u32) {
     if depth == 0 {
         return;
     }
 
     // Generate legal moves for the current turn (white or black)
-    let legal_positions = if is_white_turn {
+    let legal_positions = if cb.side_to_move == Color::White {
         white_legal_moves(cb)
     } else {
         black_legal_moves(cb)
@@ -90,9 +92,12 @@ pub fn perft_divide(cb: &Chessboard, depth: u32, is_white_turn: bool) {
 
     // For each legal move, calculate the perft of the next depth
     for pos in legal_positions {
-        let nodes = perft(&pos, depth - 1, !is_white_turn);
+        let nodes = perft(&pos, depth - 1);
+        println!("\n Table:");
+        display_board(&pos);
         let compare = compare_boards(cb, &pos).unwrap();
         // println!("COMPARE: {:?}", compare);
+        // display_board(&pos);
         let formatted_move = format_move(compare.0, compare.1);
         println!("{}: {}", formatted_move, nodes);
         total_nodes += nodes;
@@ -141,14 +146,14 @@ mod perft_tests {
     #[test]
     fn test_perft_initial_position() {
         let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 1, true);
+        let nodes = perft(&cb, 1);
         assert_eq!(nodes, 20); // Adjust the expected value based on your move generation logic
     }
 
     #[test]
     fn test_perft_depth_2() {
         let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 2, true);
+        let nodes = perft(&cb, 2);
         assert_eq!(nodes, 400); // Adjust the expected value based on your move generation logic
     }
 
@@ -156,14 +161,14 @@ mod perft_tests {
     fn test_perft_depth_3() {
         println!("TESTIRANJE::");
         let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 3, true);
+        let nodes = perft(&cb, 3);
         assert_eq!(nodes, 8902); // Adjust the expected value based on your move generation logic
     }
 
     #[test]
     fn test_perft_depth_4() {
         let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 4, true);
+        let nodes = perft(&cb, 4);
         assert_eq!(nodes, 197281); // Adjust the expected value based on your move generation logic
     }
 
@@ -171,7 +176,7 @@ mod perft_tests {
     fn test_perft_depth_5() {
         let cb = Chessboard::new_initial_board();
         let start = Instant::now();
-        let nodes = perft(&cb, 5, true);
+        let nodes = perft(&cb, 5);
         let duration = start.elapsed();
         println!("Result: {}", nodes);
         println!("Time taken: {:?}", duration);
@@ -181,14 +186,14 @@ mod perft_tests {
     #[test]
     pub fn test_perft_depth_6() {
         let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 6, true);
+        let nodes = perft(&cb, 6);
         assert_eq!(nodes, 119060324); // Adjust the expected value based on your move generation logic
     }
 
     #[test]
     fn test_perft_divide() {
         let cb = Chessboard::new_initial_board();
-        perft_divide(&cb, 1, true); // Display moves at depth 1 for white's turn
+        perft_divide(&cb, 1); // Display moves at depth 1 for white's turn
     }
 
     #[test]
@@ -204,7 +209,7 @@ mod perft_tests {
             println!("anti {}: ", i);
             display_bitboard(*d);
         }
-        perft_divide(&cb, 2, true); // Display moves at depth 2 for white's turn
+        perft_divide(&cb, 2); // Display moves at depth 2 for white's turn
     }
 
     // #[test]
@@ -223,6 +228,6 @@ mod perft_tests {
         cb.white_pawns = 0x80017e00;
         cb.black_pawns = 0x3f00c000000000;
         display_board(&cb);
-        perft_divide(&cb, 1, true); // Display moves at depth 4 for white's turn
+        perft_divide(&cb, 1); // Display moves at depth 4 for white's turn
     }
 }

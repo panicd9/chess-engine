@@ -1,4 +1,4 @@
-use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, Square}, display::display_board, utils::{BLACK_KING_CASTLE_SQUARES, BLACK_QUEEN_CASTLE_SQUARES, WHITE_KING_CASTLE_SQUARES, WHITE_QUEEN_CASTLE_SQUARES}};
+use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, Square}, display::display_board, utils::{BLACK_KING_CASTLE_EMPTY_SQUARES, BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES, BLACK_QUEEN_CASTLE_EMPTY_SQUARES, BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_KING_CASTLE_EMPTY_SQUARES, WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_QUEEN_CASTLE_EMPTY_SQUARES, WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES}};
 
 pub const KING_MOVES_CAPACITY: usize = 5;
 
@@ -49,9 +49,9 @@ pub fn white_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     // Castling moves
     if cb.white_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
-        let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_SQUARES & occupancy == 0;
+        let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
         // TODO: No need to calculate all black attacks, we can use superpiece on castling squares instead
-        let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_SQUARES) != 0;
+        let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_EMPTY_SQUARES) != 0;
         if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
             let new_position = cb.make_white_kingside_castle();
             new_positions.push(new_position);
@@ -60,8 +60,8 @@ pub fn white_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     if cb.white_can_castle_queen_side {
         // Queenside castling: ensure the squares between the king and rook are empty
-        let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_SQUARES & occupancy == 0;
-        let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_SQUARES) != 0;
+        let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
+        let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_EMPTY_SQUARES) != 0;
         if are_queen_side_castle_squares_empty && !are_queenside_castle_squares_attacked {
             let new_position = cb.make_white_queenside_castle();
             new_positions.push(new_position);
@@ -90,9 +90,9 @@ pub fn black_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     // Castling moves
     if cb.black_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
-        let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_SQUARES & occupancy == 0;
+        let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
         let are_kingside_castle_squares_attacked =
-            (cb.all_white_attacks() & BLACK_KING_CASTLE_SQUARES) != 0;
+            (cb.all_white_attacks() & BLACK_KING_CASTLE_EMPTY_SQUARES) != 0;
         if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
             let new_position = cb.make_black_kingside_castle();
             new_positions.push(new_position);
@@ -101,9 +101,9 @@ pub fn black_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     if cb.black_can_castle_queen_side {
         // Queenside castling: ensure the squares between the king and rook are empty
-        let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_SQUARES & occupancy == 0;
+        let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
         let are_queenside_castle_squares_attacked =
-            (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_SQUARES) != 0;
+            (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_EMPTY_SQUARES) != 0;
         if are_queenside_castle_squares_empty && !are_queenside_castle_squares_attacked {
             let new_position = cb.make_black_queenside_castle();
             new_positions.push(new_position);
@@ -134,10 +134,10 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     // Castling moves
     if cb.white_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
-        let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_SQUARES & occupancy == 0;
+        let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_kingside_castle_squares_empty {
             // Only calculate attacks if the squares are empty
-            let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_SQUARES) != 0;
+            let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_white_kingside_castle();
                 new_positions.push(new_position);
@@ -147,10 +147,10 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     if cb.white_can_castle_queen_side {
         // Queenside castling: ensure the squares between the king and rook are empty
-        let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_SQUARES & occupancy == 0;
+        let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_queen_side_castle_squares_empty {
             // Only calculate attacks if the squares are empty
-            let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_SQUARES) != 0;
+            let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_white_queenside_castle();
                 new_positions.push(new_position);
@@ -182,10 +182,10 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     // Castling moves
     if cb.black_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
-        let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_SQUARES & occupancy == 0;
+        let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_kingside_castle_squares_empty {
             // Only calculate attacks if the squares are empty
-            let are_kingside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_KING_CASTLE_SQUARES) != 0;
+            let are_kingside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_black_kingside_castle();
                 new_positions.push(new_position);
@@ -195,10 +195,10 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 
     if cb.black_can_castle_queen_side {
         // Queenside castling: ensure the squares between the king and rook are empty
-        let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_SQUARES & occupancy == 0;
+        let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_queenside_castle_squares_empty {
             // Only calculate attacks if the squares are empty
-            let are_queenside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_SQUARES) != 0;
+            let are_queenside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_black_queenside_castle();
                 new_positions.push(new_position);
