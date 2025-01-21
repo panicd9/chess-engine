@@ -1,7 +1,7 @@
 use chess_engine::{chessboard::{Chessboard, Color}, display::{self, display_board}, perft::{perft, perft_divide}, squares::SquareBitboard};
 
 #[test]
-pub fn initial_position(){
+pub fn initial_position_1(){
     let cb = Chessboard::new_initial_board();
     // display_board(&cb);
 
