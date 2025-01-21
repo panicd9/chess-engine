@@ -1298,6 +1298,11 @@ impl Chessboard {
             return true;
         }
 
+        let king_direction = king_attacks(white_king_bitboard);
+        if king_direction & self.black_king != 0 {
+            return true;
+        }
+
         // If no attack found, return false
         false
     }
@@ -1307,9 +1312,6 @@ impl Chessboard {
         let occupancy = self.get_occupancy();
 
         // Check for attacks from white bishops or queens (since they share similar attack patterns)
-        if black_king_bitboard == 0 {
-            display_board(self);
-        }
         let bishop_direction = single_bishop_attacks(occupancy, black_king_bitboard);
         if bishop_direction & (self.white_bishops | self.white_queens) != 0 {
             return true;
@@ -1330,6 +1332,11 @@ impl Chessboard {
         // Check for attacks from white pawns (note: white pawns attack diagonally upwards)
         let pawn_direction = single_black_pawn_attacks(black_king_bitboard);
         if pawn_direction & self.white_pawns != 0 {
+            return true;
+        }
+
+        let king_direction = king_attacks(black_king_bitboard);
+        if king_direction & self.white_king != 0 {
             return true;
         }
 

@@ -93,8 +93,8 @@ pub fn perft_divide(cb: &Chessboard, depth: u32) {
     // For each legal move, calculate the perft of the next depth
     for pos in legal_positions {
         let nodes = perft(&pos, depth - 1);
-        println!("\n Table:");
-        display_board(&pos);
+        // println!("\n Table:");
+        // display_board(&pos);
         let compare = compare_boards(cb, &pos).unwrap();
         // println!("COMPARE: {:?}", compare);
         // display_board(&pos);
