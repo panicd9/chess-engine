@@ -8,3 +8,4 @@ pub mod search;
 pub mod perft;
 pub mod eval;
 pub mod squares;
+pub mod piece_square_tables;

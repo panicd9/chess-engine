@@ -24,7 +24,7 @@ pub fn perft(cb: &Chessboard, depth: u32) -> u64 {
 }
 
 /// Compares two Chessboards and returns a list of moves as a tuple (from_square, to_square).
-fn compare_boards(before: &Chessboard, after: &Chessboard) -> Option<(usize, usize)> {
+pub fn compare_boards(before: &Chessboard, after: &Chessboard) -> Option<(usize, usize)> {
     // Compare bitboards for each piece type to identify the difference
     let piece_bitboards = [
         ("P", before.white_pawns, after.white_pawns),
@@ -119,7 +119,7 @@ pub fn perft_divide(cb: &Chessboard, depth: u32) {
     // println!("Nodes searched: {}", total_nodes);
 }
 
-fn format_move(from: usize, to: usize) -> String {
+pub fn format_move(from: usize, to: usize) -> String {
     // Convert square index to chess notation (e.g., "e2e4")
     let start_square = square_to_notation(from);
     let end_square = square_to_notation(to);

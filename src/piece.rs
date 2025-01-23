@@ -7,3 +7,15 @@ pub enum Piece {
     Queen,
     King,
 }
+
+pub enum ColoredPiece {
+    White(Piece),
+    Black(Piece),
+}
+
+pub enum PromotionPiece {
+    Queen,
+    Knight,
+    Bishop,
+    Rook,
+}

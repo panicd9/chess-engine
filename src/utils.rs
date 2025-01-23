@@ -139,6 +139,11 @@ pub const WHITE_QUEEN_CASTLE_EMPTY_SQUARES: u64 = 0xe;
 pub const BLACK_KING_CASTLE_EMPTY_SQUARES: u64 = 0x6000000000000000;
 pub const BLACK_QUEEN_CASTLE_EMPTY_SQUARES: u64 = 0xe00000000000000;
 
+pub const WHITE_KINGSIDE_TARGET_SQUARE: u64 = 0x40;
+pub const WHITE_QUEENSIDE_TARGET_SQUARE: u64 = 0x4;
+pub const BLACK_KINGSIDE_TARGET_SQUARE: u64 = 0x4000000000000000;
+pub const BLACK_QUEENSIDE_TARGET_SQUARE: u64 = 0x400000000000000;
+
 pub const WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES: u64 = 0x1c;
 pub const BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES: u64 = 0x1c00000000000000;
 
@@ -184,4 +189,8 @@ pub fn calculate_sliding_attacks(
     let reverse =
         reverse_bits(occupancy_in_line).wrapping_sub(reverse_bits(pieces_in_line).wrapping_mul(2));
     (forward ^ reverse_bits(reverse)) & line_mask
+}
+
+pub fn singleton_bitboard_from_square(square: usize) -> SingletonBitboard {
+    1 << square
 }

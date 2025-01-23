@@ -15,7 +15,7 @@ pub mod move_gen_knight;
 pub mod move_gen_bishop;
 pub mod move_gen_queen;
 pub mod move_gen_king;
-
+pub mod check_and_make_move;
 
 // pub fn generate_rook_moves(rook: u64, occupied: u64) -> u64 {
 //     let square = rook.trailing_zeros() as usize;
@@ -76,7 +76,7 @@ pub fn black_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 }
 
 pub fn white_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(40);
+    let mut new_positions = Vec::with_capacity(50);
 
     new_positions.append(&mut white_pawns_legal_moves(cb));
     new_positions.append(&mut white_knights_legal_moves(cb));
@@ -89,7 +89,7 @@ pub fn white_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
 }
 
 pub fn black_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(40);
+    let mut new_positions = Vec::with_capacity(50);
 
     new_positions.append(&mut black_pawns_legal_moves(cb));
     new_positions.append(&mut black_knights_legal_moves(cb));

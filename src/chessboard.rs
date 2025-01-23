@@ -23,19 +23,11 @@ use core::net;
 use file_masks::{FILE_A, FILE_H};
 
 use crate::{
-    display::{self, display_board},
-    move_gen::{
-        move_gen_bishop::{all_bishops_attacks, single_bishop_attacks},
-        move_gen_king::king_attacks,
-        move_gen_knight::knight_attacks_from_single_knight_bitboard,
-        move_gen_pawn::{single_black_pawn_attacks, single_white_pawn_attacks},
-        move_gen_queen::{all_queens_attacks, single_queen_attacks},
-        move_gen_rook::{all_rooks_attacks, single_rook_attacks},
-    },
-    utils::{
-        BLACK_KINGSIDE_ROOK, BLACK_QUEENSIDE_ROOK, BLACK_ROOKS_MASK, BLACK_ROOK_KINGSIDE,
-        WHITE_KINGSIDE_ROOK, WHITE_QUEENSIDE_ROOK, WHITE_ROOKS_MASK, WHITE_ROOK_KINGSIDE,
-    },
+    display::{self, display_board}, move_gen::{
+        check_and_make_move::{check_and_make_black_bishop_move, check_and_make_black_king_move, check_and_make_black_knight_move, check_and_make_black_pawn_move, check_and_make_black_queen_move, check_and_make_black_rook_move, check_and_make_white_bishop_move, check_and_make_white_king_move, check_and_make_white_knight_move, check_and_make_white_pawn_move, check_and_make_white_queen_move, check_and_make_white_rook_move}, move_gen_bishop::{all_bishops_attacks, single_bishop_attacks}, move_gen_king::king_attacks, move_gen_knight::knight_attacks_from_single_knight_bitboard, move_gen_pawn::{single_black_pawn_attacks, single_white_pawn_attacks}, move_gen_queen::{all_queens_attacks, single_queen_attacks}, move_gen_rook::{all_rooks_attacks, single_rook_attacks}
+    }, piece::{Piece, PromotionPiece}, utils::{
+        singleton_bitboard_from_square, BLACK_KINGSIDE_ROOK, BLACK_QUEENSIDE_ROOK, BLACK_ROOKS_MASK, BLACK_ROOK_KINGSIDE, WHITE_KINGSIDE_ROOK, WHITE_QUEENSIDE_ROOK, WHITE_ROOKS_MASK, WHITE_ROOK_KINGSIDE
+    }
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -357,17 +349,43 @@ impl Chessboard {
         })
     }
 
-    // pub fn make_move(&self, from: Square, to: Square) -> Self {
-    //     let mut new_chessboard = self.clone_and_clear_en_passant();
+    pub fn make_move(&self, from: Square, to: Square, promotion_piece: Option<PromotionPiece>) -> Result<Self, &'static str> {
+        let from_bitboard = singleton_bitboard_from_square(from);
+        match self.side_to_move {
+            Color::White => {
+                if from_bitboard & self.white_pawns != 0 {
+                    return check_and_make_white_pawn_move(self, from, to, promotion_piece);
+                } else if from_bitboard & self.white_knights != 0 {
+                    return check_and_make_white_knight_move(self, from, to);
+                } else if from_bitboard & self.white_bishops != 0 {
+                    return check_and_make_white_bishop_move(self, from, to);
+                } else if from_bitboard & self.white_rooks != 0 {
+                    return check_and_make_white_rook_move(self, from, to);
+                } else if from_bitboard & self.white_queens != 0 {
+                    return check_and_make_white_queen_move(self, from, to);
+                } else if from_bitboard & self.white_king != 0 {
+                    return check_and_make_white_king_move(self, from, to);
+                }
+            },
+            Color::Black => {
+                if from_bitboard & self.black_pawns != 0 {
+                    return check_and_make_black_pawn_move(self, from, to, promotion_piece);
+                } else if from_bitboard & self.black_knights != 0 {
+                    return check_and_make_black_knight_move(self, from, to);
+                } else if from_bitboard & self.black_bishops != 0 {
+                    return check_and_make_black_bishop_move(self, from, to);
+                } else if from_bitboard & self.black_rooks != 0 {
+                    return check_and_make_black_rook_move(self, from, to);
+                } else if from_bitboard & self.black_queens != 0 {
+                    return check_and_make_black_queen_move(self, from, to);
+                } else if from_bitboard & self.black_king != 0 {
+                    return check_and_make_black_king_move(self, from, to);
+                }
+            },
+        }
 
-    //     match self.side_to_move {
-    //         Color::White => {
-
-    //         },
-    //         Color::Black => todo!(),
-    //     }
-
-    // }
+        return Err("Invalid move");
+    }
 
     // pub fn get_white_attacks(&self) -> Bitboard {
     //     let white_pawn_attacks = self.white_pawns_attacks();
