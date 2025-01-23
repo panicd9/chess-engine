@@ -13,7 +13,7 @@ pub fn nega_max_alpha_beta(cb: &Chessboard, depth: u32, is_white_turn: bool, alp
     };
 
     let mut max: i64 = i64::MIN;
-    let mut best_move = cb.clone();
+    let mut best_move = *cb;
     let mut alpha = alpha;
     let mut beta = beta;
 

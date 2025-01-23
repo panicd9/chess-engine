@@ -8,9 +8,23 @@ pub enum Piece {
     King,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ColoredPiece {
-    White(Piece),
-    Black(Piece),
+    WhitePawn,
+    WhiteKnight,
+    WhiteRook,
+    WhiteBishop,
+    WhiteQueen,
+    WhiteKing,
+
+    BlackPawn,
+    BlackKnight,
+    BlackRook,
+    BlackBishop,
+    BlackQueen,
+    BlackKing,
+
+    Empty,
 }
 
 pub enum PromotionPiece {

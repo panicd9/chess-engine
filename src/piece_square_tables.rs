@@ -159,18 +159,18 @@ pub const BLACK_KING_ENDGAME_TABLE: [i64; 64] = [
 pub fn get_piece_at_square(cb: &Chessboard, square_bitboard: SingletonBitboard) -> Option<ColoredPiece> {
     // Define all piece mappings in a compact and maintainable structure
     let piece_mappings = [
-        (cb.white_pawns, ColoredPiece::White(Piece::Pawn)),
-        (cb.black_pawns, ColoredPiece::Black(Piece::Pawn)),
-        (cb.white_knights, ColoredPiece::White(Piece::Knight)),
-        (cb.black_knights, ColoredPiece::Black(Piece::Knight)),
-        (cb.white_bishops, ColoredPiece::White(Piece::Bishop)),
-        (cb.black_bishops, ColoredPiece::Black(Piece::Bishop)),
-        (cb.white_rooks, ColoredPiece::White(Piece::Rook)),
-        (cb.black_rooks, ColoredPiece::Black(Piece::Rook)),
-        (cb.white_queens, ColoredPiece::White(Piece::Queen)),
-        (cb.black_queens, ColoredPiece::Black(Piece::Queen)),
-        (cb.white_king, ColoredPiece::White(Piece::King)),
-        (cb.black_king, ColoredPiece::Black(Piece::King)),
+        (cb.white_pawns, ColoredPiece::WhitePawn),
+        (cb.white_knights, ColoredPiece::WhiteKnight),
+        (cb.white_rooks, ColoredPiece::WhiteRook),
+        (cb.white_bishops, ColoredPiece::WhiteBishop),
+        (cb.white_queens, ColoredPiece::WhiteQueen),
+        (cb.white_king, ColoredPiece::WhiteKing),
+        (cb.black_pawns, ColoredPiece::BlackPawn),
+        (cb.black_knights, ColoredPiece::BlackKnight),
+        (cb.black_rooks, ColoredPiece::BlackRook),
+        (cb.black_bishops, ColoredPiece::BlackBishop),
+        (cb.black_queens, ColoredPiece::BlackQueen),
+        (cb.black_king, ColoredPiece::BlackKing),
     ];
 
     // Iterate over the mappings and find the first match

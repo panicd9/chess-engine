@@ -20,28 +20,21 @@ pub fn evaluate(cb: &Chessboard) -> i64 {
 
 
     let mut piece_square_value = 0;
-    for square in 0..64 {
-        let square_bitboard = 1 << square;
-        let piece = get_piece_at_square(cb, square_bitboard);
-        if let Some(piece) = piece {
-            match piece {
-                ColoredPiece::White(piece) => match piece {
-                    Piece::Pawn => piece_square_value += WHITE_PAWN_TABLE[square],
-                    Piece::Knight => piece_square_value += WHITE_KNIGHT_TABLE[square],
-                    Piece::Bishop => piece_square_value += WHITE_BISHOP_TABLE[square],
-                    Piece::Rook => piece_square_value += WHITE_ROOK_TABLE[square],
-                    Piece::Queen => piece_square_value += WHITE_QUEEN_TABLE[square],
-                    Piece::King => piece_square_value += WHITE_KING_MIDGAME_TABLE[square],
-                },
-                ColoredPiece::Black(piece) => match piece {
-                    Piece::Pawn => piece_square_value -= BLACK_PAWN_TABLE[square],
-                    Piece::Knight => piece_square_value -= BLACK_KNIGHT_TABLE[square],
-                    Piece::Bishop => piece_square_value -= BLACK_BISHOP_TABLE[square],
-                    Piece::Rook => piece_square_value -= BLACK_ROOK_TABLE[square],
-                    Piece::Queen => piece_square_value -= BLACK_QUEEN_TABLE[square],
-                    Piece::King => piece_square_value -= BLACK_KING_MIDGAME_TABLE[square],
-                }
-            }
+    for (index, piece) in cb.piece_square.iter().enumerate() {
+        match piece {
+            ColoredPiece::WhitePawn => piece_square_value += WHITE_PAWN_TABLE[index],
+            ColoredPiece::WhiteKnight => piece_square_value += WHITE_KNIGHT_TABLE[index],
+            ColoredPiece::WhiteRook => piece_square_value += WHITE_ROOK_TABLE[index],
+            ColoredPiece::WhiteBishop => piece_square_value += WHITE_BISHOP_TABLE[index],
+            ColoredPiece::WhiteQueen => piece_square_value += WHITE_QUEEN_TABLE[index],
+            ColoredPiece::WhiteKing => piece_square_value += WHITE_KING_MIDGAME_TABLE[index],
+            ColoredPiece::BlackPawn => piece_square_value -= BLACK_PAWN_TABLE[index],
+            ColoredPiece::BlackKnight => piece_square_value -= BLACK_KNIGHT_TABLE[index],
+            ColoredPiece::BlackRook => piece_square_value -= BLACK_ROOK_TABLE[index],
+            ColoredPiece::BlackBishop => piece_square_value -= BLACK_BISHOP_TABLE[index],
+            ColoredPiece::BlackQueen => piece_square_value -= BLACK_QUEEN_TABLE[index],
+            ColoredPiece::BlackKing => piece_square_value -= BLACK_KING_MIDGAME_TABLE[index],
+            ColoredPiece::Empty => {},
         }
     }
 

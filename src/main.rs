@@ -65,7 +65,11 @@ fn main() {
         }
 
         // Engine move
-        let (score, new_cb) = engine_move(cb, 5);
+        let start_time = std::time::Instant::now();
+        let (score, new_cb) = engine_move(cb, 6);
+        let elapsed = start_time.elapsed();
+        println!("Time taken: {:?}", elapsed);
+
         let compared = compare_boards(&cb, &new_cb);
         if compared.is_some() {
             let (from, to) = compared.unwrap();
@@ -118,7 +122,14 @@ fn main() {
         }
     }
     
-    fn engine_move(cb: Chessboard, depth: u32) -> (i64, Chessboard) {
-        nega_max_alpha_beta(&cb, depth, false, i64::MIN, i64::MAX)
+    fn engine_move(cb: Chessboard, depth: u32) -> (f64, Chessboard) {
+        let is_white_turn = if let Color::White = cb.side_to_move { true } else { false };
+        let (score, best_cb) = nega_max_alpha_beta(&cb, depth, is_white_turn, i64::MIN, i64::MAX);
+        let float_score = if cb.side_to_move == Color::Black {
+            -score as f64 / 100.0
+        } else {
+            score as f64 / 100.0
+        };
+        (float_score, best_cb)
     }
 }
