@@ -1,4 +1,4 @@
-use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, Square}, display::display_board, utils::{BLACK_KING_CASTLE_EMPTY_SQUARES, BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES, BLACK_QUEEN_CASTLE_EMPTY_SQUARES, BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_KING_CASTLE_EMPTY_SQUARES, WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_QUEEN_CASTLE_EMPTY_SQUARES, WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES}};
+use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, SquareIndex}, display::display_board, move_list::Move, utils::{BLACK_KING_CASTLE_EMPTY_SQUARES, BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES, BLACK_QUEEN_CASTLE_EMPTY_SQUARES, BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_KING_CASTLE_EMPTY_SQUARES, WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_QUEEN_CASTLE_EMPTY_SQUARES, WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES}};
 
 pub const KING_MOVES_CAPACITY: usize = 5;
 
@@ -17,7 +17,7 @@ static KING_ATTACKS: [Bitboard; 64] = [
 
 // Function to get the king attacks for a given square
 // #[inline(always)]
-pub fn king_attacks_from_square(square: Square) -> Bitboard {
+pub fn king_attacks_from_square(square: SquareIndex) -> Bitboard {
     // Return the pre-calculated attack pattern for the given square
     KING_ATTACKS[square]
 }
@@ -30,8 +30,8 @@ pub fn king_attacks(king: SingletonBitboard) -> Bitboard {
     king_attacks_from_square(square)
 }
 
-pub fn white_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KING_MOVES_CAPACITY);
+pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(KING_MOVES_CAPACITY);
     let king = cb.white_king;
     let occupancy = cb.get_occupancy();
 
@@ -42,91 +42,8 @@ pub fn white_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_attacks != 0 {
         let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
         let new_position = cb.make_white_king_move(king, single_attack_bitboard);
-        new_positions.push(new_position);
-        remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
-    }
-
-    // Castling moves
-    if cb.white_can_castle_king_side {
-        // Kingside castling: ensure the squares between the king and rook are empty
-        let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
-        // TODO: No need to calculate all black attacks, we can use superpiece on castling squares instead
-        let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_EMPTY_SQUARES) != 0;
-        if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
-            let new_position = cb.make_white_kingside_castle();
-            new_positions.push(new_position);
-        }
-    }
-
-    if cb.white_can_castle_queen_side {
-        // Queenside castling: ensure the squares between the king and rook are empty
-        let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
-        let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_EMPTY_SQUARES) != 0;
-        if are_queen_side_castle_squares_empty && !are_queenside_castle_squares_attacked {
-            let new_position = cb.make_white_queenside_castle();
-            new_positions.push(new_position);
-        }
-    }
-
-    new_positions
-}
-
-pub fn black_king_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KING_MOVES_CAPACITY);
-    let king = cb.black_king;
-    let occupancy = cb.get_occupancy();
-
-    // Normal king moves
-    let attacks = king_attacks(king) & !cb.get_black_occupancy();
-    let mut remaining_attacks = attacks;
-
-    while remaining_attacks != 0 {
-        let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-        let new_position = cb.make_black_king_move(king, single_attack_bitboard);
-        new_positions.push(new_position);
-        remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
-    }
-
-    // Castling moves
-    if cb.black_can_castle_king_side {
-        // Kingside castling: ensure the squares between the king and rook are empty
-        let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
-        let are_kingside_castle_squares_attacked =
-            (cb.all_white_attacks() & BLACK_KING_CASTLE_EMPTY_SQUARES) != 0;
-        if are_kingside_castle_squares_empty && !are_kingside_castle_squares_attacked {
-            let new_position = cb.make_black_kingside_castle();
-            new_positions.push(new_position);
-        }
-    }
-
-    if cb.black_can_castle_queen_side {
-        // Queenside castling: ensure the squares between the king and rook are empty
-        let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
-        let are_queenside_castle_squares_attacked =
-            (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_EMPTY_SQUARES) != 0;
-        if are_queenside_castle_squares_empty && !are_queenside_castle_squares_attacked {
-            let new_position = cb.make_black_queenside_castle();
-            new_positions.push(new_position);
-        }
-    }
-
-    new_positions
-}
-
-pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KING_MOVES_CAPACITY);
-    let king = cb.white_king;
-    let occupancy = cb.get_occupancy();
-
-    // Normal king moves
-    let attacks = king_attacks(king) & !cb.get_white_occupancy();
-    let mut remaining_attacks = attacks;
-
-    while remaining_attacks != 0 {
-        let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-        let new_position = cb.make_white_king_move(king, single_attack_bitboard);
-        if !new_position.is_white_king_under_attack() {
-            new_positions.push(new_position);
+        if !new_position.chessboard.is_white_king_under_attack() {
+            moves.push(new_position);
         }
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
@@ -140,7 +57,7 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
             let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_white_kingside_castle();
-                new_positions.push(new_position);
+                moves.push(new_position);
             }
         }
     }
@@ -153,16 +70,16 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
             let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_white_queenside_castle();
-                new_positions.push(new_position);
+                moves.push(new_position);
             }
         }
     }
 
-    new_positions
+    moves
 }
 
-pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KING_MOVES_CAPACITY);
+pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(KING_MOVES_CAPACITY);
     let king = cb.black_king;
     let occupancy = cb.get_occupancy();
 
@@ -173,8 +90,8 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     while remaining_attacks != 0 {
         let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
         let new_position = cb.make_black_king_move(king, single_attack_bitboard);
-        if !new_position.is_black_king_under_attack() {
-            new_positions.push(new_position);
+        if !new_position.chessboard.is_black_king_under_attack() {
+            moves.push(new_position);
         }
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
@@ -188,7 +105,7 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
             let are_kingside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_black_kingside_castle();
-                new_positions.push(new_position);
+                moves.push(new_position);
             }
         }
     }
@@ -201,10 +118,10 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
             let are_queenside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_black_queenside_castle();
-                new_positions.push(new_position);
+                moves.push(new_position);
             }
         }
     }
 
-    new_positions
+    moves
 }

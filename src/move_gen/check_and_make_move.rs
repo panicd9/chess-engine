@@ -1,7 +1,7 @@
 use crate::{
     chessboard::{
         rank_masks::{RANK_1, RANK_2, RANK_7, RANK_8},
-        Chessboard, Square,
+        Chessboard, SquareIndex,
     },
     piece::{self, Piece, PromotionPiece},
     utils::{
@@ -28,8 +28,8 @@ use super::{
 
 pub fn check_and_make_white_pawn_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
     promotion_piece: Option<PromotionPiece>,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
@@ -53,8 +53,8 @@ pub fn check_and_make_white_pawn_move(
                 if forward == to_bitboard {
                     let new_position = cb.make_white_pawn_forward_move(single_pawn, forward);
                     // TODO: Can be optimized by checking if the king is under attack before changing side to move
-                    if !new_position.is_white_king_under_attack() {
-                        return Ok(new_position);
+                    if !new_position.chessboard.is_white_king_under_attack() {
+                        return Ok(new_position.chessboard);
                     }
                 }
 
@@ -64,8 +64,8 @@ pub fn check_and_make_white_pawn_move(
                     if double_forward != 0 && double_forward == to_bitboard {
                         let new_double_position =
                             cb.make_white_pawn_double_forward_move(single_pawn, double_forward);
-                        if !new_double_position.is_white_king_under_attack() {
-                            return Ok(new_double_position);
+                        if !new_double_position.chessboard.is_white_king_under_attack() {
+                            return Ok(new_double_position.chessboard);
                         }
                     }
                 }
@@ -76,10 +76,10 @@ pub fn check_and_make_white_pawn_move(
                     cb.make_all_white_pawn_promotion_moves(single_pawn, forward);
                 match promotion_piece {
                     Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0]),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1]),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2]),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3]),
+                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
+                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
+                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
+                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
                     },
                     None => return Err("Promotion piece not provided"),
                 }
@@ -98,18 +98,18 @@ pub fn check_and_make_white_pawn_move(
 
             if single_attack & RANK_8 == 0 {
                 let new_position = cb.make_white_pawn_capture_move(single_pawn, single_attack);
-                if !new_position.is_white_king_under_attack() {
-                    return Ok(new_position);
+                if !new_position.chessboard.is_white_king_under_attack() {
+                    return Ok(new_position.chessboard);
                 }
             } else {
                 let new_promotion_positions =
                     cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack);
                 match promotion_piece {
                     Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0]),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1]),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2]),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3]),
+                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
+                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
+                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
+                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
                     },
                     None => return Err("Promotion piece not provided"),
                 }
@@ -123,8 +123,8 @@ pub fn check_and_make_white_pawn_move(
             if en_passant_mask != 0 {
                 let new_position =
                     cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
-                if !new_position.is_white_king_under_attack() {
-                    return Ok(new_position);
+                if !new_position.chessboard.is_white_king_under_attack() {
+                    return Ok(new_position.chessboard);
                 }
             }
         }
@@ -136,8 +136,8 @@ pub fn check_and_make_white_pawn_move(
 
 pub fn check_and_make_black_pawn_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
     promotion_piece: Option<PromotionPiece>,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
@@ -160,8 +160,8 @@ pub fn check_and_make_black_pawn_move(
             if forward & RANK_1 == 0 {
                 if forward == to_bitboard {
                     let new_position = cb.make_black_pawn_forward_move(single_pawn, forward);
-                    if !new_position.is_black_king_under_attack() {
-                        return Ok(new_position);
+                    if !new_position.chessboard.is_black_king_under_attack() {
+                        return Ok(new_position.chessboard);
                     }
                 }
 
@@ -171,8 +171,8 @@ pub fn check_and_make_black_pawn_move(
                     if double_forward != 0 && double_forward == to_bitboard {
                         let new_double_position =
                             cb.make_black_pawn_double_forward_move(single_pawn, double_forward);
-                        if !new_double_position.is_black_king_under_attack() {
-                            return Ok(new_double_position);
+                        if !new_double_position.chessboard.is_black_king_under_attack() {
+                            return Ok(new_double_position.chessboard);
                         }
                     }
                 }
@@ -183,10 +183,10 @@ pub fn check_and_make_black_pawn_move(
                     cb.make_all_black_pawn_promotion_moves(single_pawn, forward);
                 match promotion_piece {
                     Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0]),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1]),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2]),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3]),
+                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
+                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
+                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
+                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
                     },
                     None => return Err("Promotion piece not provided"),
                 }
@@ -205,18 +205,18 @@ pub fn check_and_make_black_pawn_move(
 
             if single_attack & RANK_1 == 0 {
                 let new_position = cb.make_black_pawn_capture_move(single_pawn, single_attack);
-                if !new_position.is_black_king_under_attack() {
-                    return Ok(new_position);
+                if !new_position.chessboard.is_black_king_under_attack() {
+                    return Ok(new_position.chessboard);
                 }
             } else {
                 let new_promotion_positions =
                     cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack);
                 match promotion_piece {
                     Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0]),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1]),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2]),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3]),
+                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
+                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
+                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
+                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
                     },
                     None => return Err("Promotion piece not provided"),
                 }
@@ -230,8 +230,8 @@ pub fn check_and_make_black_pawn_move(
             if en_passant_mask != 0 {
                 let new_position =
                     cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
-                if !new_position.is_black_king_under_attack() {
-                    return Ok(new_position);
+                if !new_position.chessboard.is_black_king_under_attack() {
+                    return Ok(new_position.chessboard);
                 }
             }
         }
@@ -243,8 +243,8 @@ pub fn check_and_make_black_pawn_move(
 
 pub fn check_and_make_white_rook_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -272,8 +272,8 @@ pub fn check_and_make_white_rook_move(
             // let mov = Move::new(cb, Piece::Rook, single_rook_bitboard, single_attack_bitboard);
             let new_position =
                 cb.make_white_rook_move(single_rook_bitboard, single_attack_bitboard);
-            if !new_position.is_white_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_white_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -285,8 +285,8 @@ pub fn check_and_make_white_rook_move(
 
 pub fn check_and_make_black_rook_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -314,8 +314,8 @@ pub fn check_and_make_black_rook_move(
 
             let new_position =
                 cb.make_black_rook_move(single_rook_bitboard, single_attack_bitboard);
-            if !new_position.is_black_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_black_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -327,8 +327,8 @@ pub fn check_and_make_black_rook_move(
 
 pub fn check_and_make_white_bishop_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -354,8 +354,8 @@ pub fn check_and_make_white_bishop_move(
             }
             let new_position =
                 cb.make_white_bishop_move(single_bishop_bitboard, single_attack_bitboard);
-            if !new_position.is_white_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_white_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -367,8 +367,8 @@ pub fn check_and_make_white_bishop_move(
 
 pub fn check_and_make_black_bishop_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -394,8 +394,8 @@ pub fn check_and_make_black_bishop_move(
             }
             let new_position =
                 cb.make_black_bishop_move(single_bishop_bitboard, single_attack_bitboard);
-            if !new_position.is_black_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_black_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -407,8 +407,8 @@ pub fn check_and_make_black_bishop_move(
 
 pub fn check_and_make_white_knight_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -432,8 +432,8 @@ pub fn check_and_make_white_knight_move(
             }
             let new_position =
                 cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard);
-            if !new_position.is_white_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_white_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -444,8 +444,8 @@ pub fn check_and_make_white_knight_move(
 
 pub fn check_and_make_black_knight_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -470,8 +470,8 @@ pub fn check_and_make_black_knight_move(
             }
             let new_position =
                 cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard);
-            if !new_position.is_black_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_black_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -483,8 +483,8 @@ pub fn check_and_make_black_knight_move(
 
 pub fn check_and_make_white_queen_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -510,8 +510,8 @@ pub fn check_and_make_white_queen_move(
             }
             let new_position =
                 cb.make_white_queen_move(single_queen_bitboard, single_attack_bitboard);
-            if !new_position.is_white_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_white_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -523,8 +523,8 @@ pub fn check_and_make_white_queen_move(
 
 pub fn check_and_make_black_queen_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -550,8 +550,8 @@ pub fn check_and_make_black_queen_move(
             }
             let new_position =
                 cb.make_black_queen_move(single_queen_bitboard, single_attack_bitboard);
-            if !new_position.is_black_king_under_attack() {
-                return Ok(new_position);
+            if !new_position.chessboard.is_black_king_under_attack() {
+                return Ok(new_position.chessboard);
             }
             remaining_attacks &= remaining_attacks - 1;
         }
@@ -563,8 +563,8 @@ pub fn check_and_make_black_queen_move(
 
 pub fn check_and_make_white_king_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -587,8 +587,8 @@ pub fn check_and_make_white_king_move(
             continue;
         }
         let new_position = cb.make_white_king_move(king, single_attack_bitboard);
-        if !new_position.is_white_king_under_attack() {
-            return Ok(new_position);
+        if !new_position.chessboard.is_white_king_under_attack() {
+            return Ok(new_position.chessboard);
         }
         remaining_attacks &= remaining_attacks - 1;
     }
@@ -603,7 +603,7 @@ pub fn check_and_make_white_king_move(
                 (cb.all_black_attacks() & WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_white_kingside_castle();
-                return Ok(new_position);
+                return Ok(new_position.chessboard);
             }
         }
     }
@@ -617,7 +617,7 @@ pub fn check_and_make_white_king_move(
                 (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_white_queenside_castle();
-                return Ok(new_position);
+                return Ok(new_position.chessboard);
             }
         }
     }
@@ -627,8 +627,8 @@ pub fn check_and_make_white_king_move(
 
 pub fn check_and_make_black_king_move(
     cb: &Chessboard,
-    from: Square,
-    to: Square,
+    from: SquareIndex,
+    to: SquareIndex,
 ) -> Result<Chessboard, &'static str> {
     let from_bitboard = singleton_bitboard_from_square(from);
     let to_bitboard = singleton_bitboard_from_square(to);
@@ -651,8 +651,8 @@ pub fn check_and_make_black_king_move(
             continue;
         }
         let new_position = cb.make_black_king_move(king, single_attack_bitboard);
-        if !new_position.is_black_king_under_attack() {
-            return Ok(new_position);
+        if !new_position.chessboard.is_black_king_under_attack() {
+            return Ok(new_position.chessboard);
         }
         remaining_attacks &= remaining_attacks - 1; 
     }
@@ -667,7 +667,7 @@ pub fn check_and_make_black_king_move(
                 (cb.all_white_attacks() & BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_black_kingside_castle();
-                return Ok(new_position);
+                return Ok(new_position.chessboard);
             }
         }
     }
@@ -681,7 +681,7 @@ pub fn check_and_make_black_king_move(
                 (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_black_queenside_castle();
-                return Ok(new_position);
+                return Ok(new_position.chessboard);
             }
         }
     }

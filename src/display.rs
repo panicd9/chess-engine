@@ -40,7 +40,7 @@ pub fn display_board(cb: &Chessboard) {
 
     // Print bottom file labels
     println!("   a   b   c   d   e   f   g   h");
-    println!("\nFEN: {}\n", to_fen(cb));
+    println!("\nFEN: {}", to_fen(cb));
 }
 
 pub fn display_board_string(cb: &Chessboard) -> String {
@@ -226,7 +226,7 @@ pub fn to_fen(cb: &Chessboard) -> String {
 
     // En passant
     let en_passant = if cb.en_passant != 0 {
-        let ep_square = cb.en_passant;
+        let ep_square = cb.en_passant.trailing_zeros();
         let file = (ep_square % 8) as u8;
         let rank = (ep_square / 8) as u8;
         format!("{}{}", (b'a' + file) as char, (b'1' + rank) as char)

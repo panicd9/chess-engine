@@ -1,13 +1,13 @@
 // use crate::chessboard::*;
 
-use move_gen_bishop::{black_bishops_legal_moves, black_bishops_pseudolegal_moves, white_bishops_legal_moves, white_bishops_pseudolegal_moves};
-use move_gen_king::{black_king_legal_moves, black_king_pseudolegal_moves, white_king_legal_moves, white_king_pseudolegal_moves};
-use move_gen_knight::{black_knights_legal_moves, black_knights_pseudolegal_moves, white_knights_legal_moves, white_knights_pseudolegal_moves};
-use move_gen_pawn::{black_pawns_legal_moves, black_pawns_pseudolegal_moves, white_pawns_legal_moves, white_pawns_pseudolegal_moves};
-use move_gen_queen::{black_queens_legal_moves, black_queens_pseudolegal_moves, white_queens_legal_moves, white_queens_pseudolegal_moves};
-use move_gen_rook::{black_rooks_legal_moves, black_rooks_pseudolegal_moves, white_rooks_legal_moves, white_rooks_pseudolegal_moves};
+use move_gen_bishop::{black_bishops_legal_moves, white_bishops_legal_moves};
+use move_gen_king::{black_king_legal_moves, white_king_legal_moves};
+use move_gen_knight::{black_knights_legal_moves, white_knights_legal_moves};
+use move_gen_pawn::{black_pawns_legal_moves, white_pawns_legal_moves};
+use move_gen_queen::{black_queens_legal_moves, white_queens_legal_moves};
+use move_gen_rook::{black_rooks_legal_moves, white_rooks_legal_moves,};
 
-use crate::chessboard::Chessboard;
+use crate::{chessboard::{Chessboard, Color}, move_list::Move};
 
 pub mod move_gen_rook;
 pub mod move_gen_pawn;
@@ -49,33 +49,16 @@ pub mod check_and_make_move;
 //     forward_attack | backward_attack
 // }
 
-pub fn white_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(100);
-
-    new_positions.append(&mut white_pawns_pseudolegal_moves(cb));
-    new_positions.append(&mut white_knights_pseudolegal_moves(cb));
-    new_positions.append(&mut white_bishops_pseudolegal_moves(cb));
-    new_positions.append(&mut white_rooks_pseudolegal_moves(cb));
-    new_positions.append(&mut white_queens_pseudolegal_moves(cb));
-    new_positions.append(&mut white_king_pseudolegal_moves(cb));
-
-    new_positions
+pub fn legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let side_to_move = cb.side_to_move;
+    if side_to_move == Color::White {
+        white_legal_moves(cb)
+    } else {
+        black_legal_moves(cb)
+    }
 }
 
-pub fn black_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(100);
-
-    new_positions.append(&mut black_pawns_pseudolegal_moves(cb));
-    new_positions.append(&mut black_knights_pseudolegal_moves(cb));
-    new_positions.append(&mut black_bishops_pseudolegal_moves(cb));
-    new_positions.append(&mut black_rooks_pseudolegal_moves(cb));
-    new_positions.append(&mut black_queens_pseudolegal_moves(cb));
-    new_positions.append(&mut black_king_pseudolegal_moves(cb));
-
-    new_positions
-}
-
-pub fn white_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+pub fn white_legal_moves(cb: &Chessboard) -> Vec<Move> {
     let mut new_positions = Vec::with_capacity(50);
 
     new_positions.append(&mut white_pawns_legal_moves(cb));
@@ -88,7 +71,7 @@ pub fn white_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
     new_positions
 }
 
-pub fn black_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
+pub fn black_legal_moves(cb: &Chessboard) -> Vec<Move> {
     let mut new_positions = Vec::with_capacity(50);
 
     new_positions.append(&mut black_pawns_legal_moves(cb));

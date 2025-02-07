@@ -16,7 +16,7 @@ pub fn perft(cb: &Chessboard, depth: u32) -> u64 {
     };
 
     for pos in legal_positions {
-        nodes += perft(&pos, depth - 1);
+        nodes += perft(&pos.chessboard, depth - 1);
         // display_board(&pos);
     }
 
@@ -92,10 +92,10 @@ pub fn perft_divide(cb: &Chessboard, depth: u32) {
 
     // For each legal move, calculate the perft of the next depth
     for pos in legal_positions {
-        let nodes = perft(&pos, depth - 1);
+        let nodes = perft(&pos.chessboard, depth - 1);
         // println!("\n Table:");
         // display_board(&pos);
-        let compare = compare_boards(cb, &pos).unwrap();
+        let compare = compare_boards(cb, &pos.chessboard).unwrap();
         // println!("COMPARE: {:?}", compare);
         // display_board(&pos);
         let formatted_move = format_move(compare.0, compare.1);

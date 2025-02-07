@@ -1,4 +1,4 @@
-use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, utils::{calculate_sliding_attacks, ANTI_DIAGONAL_MASKS, DIAGONAL_MASKS}};
+use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, move_list::Move, utils::{calculate_sliding_attacks, ANTI_DIAGONAL_MASKS, DIAGONAL_MASKS}};
 
 use super::{move_gen_bishop::{all_bishops_attacks, single_bishop_attacks}, move_gen_rook::{all_rooks_attacks, single_rook_attacks}};
 
@@ -48,9 +48,8 @@ pub fn all_queens_attacks(occupancy: u64, queens: u64) -> u64 {
     combined_attacks
 }
 
-// Generate pseudolegal moves for white queens.
-pub fn white_queens_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
+pub fn white_queens_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
     let mut remaining_queens = cb.white_queens;
 
     while remaining_queens != 0 {
@@ -61,20 +60,21 @@ pub fn white_queens_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_white_queen_move(single_queen_bitboard, single_attack_bitboard);
-            new_positions.push(new_position);
+            let new_move = cb.make_white_queen_move(single_queen_bitboard, single_attack_bitboard);
+            if !new_move.chessboard.is_white_king_under_attack() {
+                moves.push(new_move);
+            }
             remaining_attacks &= remaining_attacks - 1; // Remove LSB
         }
 
         remaining_queens &= remaining_queens - 1; // Remove LSB
     }
 
-    new_positions
+    moves
 }
 
-// Generate pseudolegal moves for black queens.
-pub fn black_queens_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
+pub fn black_queens_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
     let mut remaining_queens = cb.black_queens;
 
     while remaining_queens != 0 {
@@ -85,32 +85,9 @@ pub fn black_queens_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_black_queen_move(single_queen_bitboard, single_attack_bitboard);
-            new_positions.push(new_position);
-            remaining_attacks &= remaining_attacks - 1; // Remove LSB
-        }
-
-        remaining_queens &= remaining_queens - 1; // Remove LSB
-    }
-
-    new_positions
-}
-
-pub fn white_queens_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
-    let mut remaining_queens = cb.white_queens;
-
-    while remaining_queens != 0 {
-        let single_queen_bitboard = remaining_queens & remaining_queens.wrapping_neg(); // Extract LSB
-        let occupancy = cb.get_occupancy();
-        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & !cb.get_white_occupancy();
-
-        let mut remaining_attacks = attacks;
-        while remaining_attacks != 0 {
-            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_white_queen_move(single_queen_bitboard, single_attack_bitboard);
-            if !new_position.is_white_king_under_attack() {
-                new_positions.push(new_position);
+            let new_move = cb.make_black_queen_move(single_queen_bitboard, single_attack_bitboard);
+            if !new_move.chessboard.is_black_king_under_attack() {
+                moves.push(new_move);
             }
             remaining_attacks &= remaining_attacks - 1; // Remove LSB
         }
@@ -118,30 +95,5 @@ pub fn white_queens_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         remaining_queens &= remaining_queens - 1; // Remove LSB
     }
 
-    new_positions
-}
-
-pub fn black_queens_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
-    let mut remaining_queens = cb.black_queens;
-
-    while remaining_queens != 0 {
-        let single_queen_bitboard = remaining_queens & remaining_queens.wrapping_neg(); // Extract LSB
-        let occupancy = cb.get_occupancy();
-        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & !cb.get_black_occupancy();
-
-        let mut remaining_attacks = attacks;
-        while remaining_attacks != 0 {
-            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_black_queen_move(single_queen_bitboard, single_attack_bitboard);
-            if !new_position.is_black_king_under_attack() {
-                new_positions.push(new_position);
-            }
-            remaining_attacks &= remaining_attacks - 1; // Remove LSB
-        }
-
-        remaining_queens &= remaining_queens - 1; // Remove LSB
-    }
-
-    new_positions
+    moves
 }

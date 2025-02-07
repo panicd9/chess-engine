@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 colored = "2.0"
 lazy_static = "1.5.0"
+crossterm = "0.28.1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

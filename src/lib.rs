@@ -9,3 +9,7 @@ pub mod perft;
 pub mod eval;
 pub mod squares;
 pub mod piece_square_tables;
+pub mod iterative_deepening;
+pub mod playing_ui;
+pub mod move_list;
+pub mod move_ordering;

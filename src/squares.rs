@@ -1,4 +1,4 @@
-pub enum SquareIndex {
+pub enum Square {
     A1 = 0,
     B1 = 1,
     C1 = 2,

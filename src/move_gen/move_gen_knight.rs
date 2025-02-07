@@ -1,4 +1,4 @@
-use crate::chessboard::{Bitboard, Chessboard, Square};
+use crate::{chessboard::{Bitboard, Chessboard, SquareIndex}, move_list::Move};
 
 pub const KNIGHTS_MOVES_CAPACITY: usize = 10;
 
@@ -17,7 +17,7 @@ static KNIGHT_ATTACKS: [Bitboard; 64] = [
 
 // Function to get the knight attacks for a given square
 // #[inline(always)]
-fn knight_attacks(square: Square) -> Bitboard {
+fn knight_attacks(square: SquareIndex) -> Bitboard {
     // Return the pre-calculated attack pattern for the given square
     KNIGHT_ATTACKS[square]
 }
@@ -30,30 +30,32 @@ pub fn knight_attacks_from_single_knight_bitboard(knight: Bitboard) -> Bitboard 
     knight_attacks(square)
 }
 
-pub fn white_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
+pub fn white_knights_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
     let mut remaining_knights = cb.white_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
         let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_white_occupancy();
-
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard);
-            new_positions.push(new_position);
+            let new_move = cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard);
+            if !new_move.chessboard.is_white_king_under_attack() {
+                moves.push(new_move);
+            }
+
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }
         
         remaining_knights &= remaining_knights - 1; // Remove the least significant knight
     }
 
-    new_positions
+    moves
 }
 
-pub fn black_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
+pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
     let mut remaining_knights = cb.black_knights;
 
     while remaining_knights != 0 {
@@ -63,55 +65,9 @@ pub fn black_knights_pseudolegal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard);
-            new_positions.push(new_position);
-            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
-        }
-        
-        remaining_knights &= remaining_knights - 1; // Remove the least significant knight
-    }
-
-    new_positions
-}
-
-pub fn white_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
-    let mut remaining_knights = cb.white_knights;
-
-    while remaining_knights != 0 {
-        let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_white_occupancy();
-        let mut remaining_attacks = attacks;
-        while remaining_attacks != 0 {
-            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard);
-            if !new_position.is_white_king_under_attack() {
-                new_positions.push(new_position);
-            }
-
-            remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
-        }
-        
-        remaining_knights &= remaining_knights - 1; // Remove the least significant knight
-    }
-
-    new_positions
-}
-
-pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
-    let mut new_positions = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
-    let mut remaining_knights = cb.black_knights;
-
-    while remaining_knights != 0 {
-        let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_black_occupancy();
-
-        let mut remaining_attacks = attacks;
-        while remaining_attacks != 0 {
-            let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_position = cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard);
-            if !new_position.is_black_king_under_attack() {
-                new_positions.push(new_position);
+            let new_move = cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard);
+            if !new_move.chessboard.is_black_king_under_attack() {
+                moves.push(new_move);
             }
 
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
@@ -120,5 +76,5 @@ pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Chessboard> {
         remaining_knights &= remaining_knights - 1; // Remove the least significant knight
     }
 
-    new_positions
+    moves
 }

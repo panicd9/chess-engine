@@ -163,6 +163,12 @@ pub const WHITE_QUEENSIDE_ROOK: SingletonBitboard = SquareBitboard::A1 as u64;
 pub const BLACK_KINGSIDE_ROOK: SingletonBitboard = SquareBitboard::H8 as u64;
 pub const BLACK_QUEENSIDE_ROOK: SingletonBitboard = SquareBitboard::A8 as u64;
 
+/// Flip a square vertically. In the original C code this was defined as `sq ^ 56`.
+#[inline]
+pub fn flip(sq: usize) -> usize {
+    sq ^ 56
+}
+
 pub fn reverse_bits(bits: u64) -> u64 {
     bits.reverse_bits()
 }
