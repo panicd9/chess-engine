@@ -1,4 +1,4 @@
-use chess_engine::{chessboard::{Chessboard, Color}, display::display_board, eval::{self, evaluate}, playing_ui::play, search::quiescence_search};
+use chess_engine::{chessboard::{Chessboard, Color}, display::display_board, eval::{self, evaluate}, playing_ui::play, search::quiescence_search_best_line};
 
 
 fn main() {

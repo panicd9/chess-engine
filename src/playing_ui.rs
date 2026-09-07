@@ -6,7 +6,7 @@ use crate::{
     },
     perft::{compare_boards, format_move},
     piece::PromotionPiece,
-    search::{nega_max_alpha_beta, nega_max_alpha_beta_best_line},
+    search::{nega_max_alpha_beta, nega_max_alpha_beta_best_line, nega_max_alpha_beta_best_move},
 };
 use crossterm::style::{Attribute, Color as TextColor, ResetColor, SetBackgroundColor, SetForegroundColor};
 use std::{
@@ -25,7 +25,7 @@ pub enum ParseError {
 pub fn play() {
     const MAX_DEPTH: u32 = 7;
 
-    let mut cb = Chessboard::new_initial_board();
+    let mut cb = Chessboard::from_fen("rnbqkb1r/p3pppp/2p2n2/8/PppP4/2N1PN2/1P3PPP/R1BQKB1R w KQkq - 0 7").unwrap();
     display_board(&cb);
 
     loop {
@@ -96,10 +96,10 @@ pub fn play() {
         start_key_listener(Arc::clone(&stop_flag));
         // Engine move
         let start_time = std::time::Instant::now();
-        let best_lines = engine_move_best_5_lines(cb, MAX_DEPTH);
         // let best_lines = engine_move_best_5_lines(cb, MAX_DEPTH);
-        // let res = engine_move(cb, MAX_DEPTH);
-        // let best_lines = vec![(res.0 , vec![res.1])];
+
+        let best_move = engine_move(cb, MAX_DEPTH);
+        let best_lines = vec![(best_move.0, vec![cb, best_move.1])];
         let elapsed = start_time.elapsed();
 
         // let compared = compare_boards(&cb, &new_cb);
@@ -128,10 +128,6 @@ pub fn play() {
             for (i, window) in best_line.1.windows(2).enumerate() {
                 let (prev, next) = (&window[0], &window[1]);
                 let compared = compare_boards(prev, next);
-
-                // println!("Move: {}, Score: {}", i + 1, best_line.0);
-                // display_board(next);
-                // println!("Debug board: {:?}", next);
 
                 if let Some((from, to)) = compared {
                     let formatted_move = format_move(from, to);
@@ -290,19 +286,20 @@ fn parse_promotion_piece(piece: char) -> Result<PromotionPiece, ParseError> {
     }
 }
 
-fn engine_move(cb: Chessboard, depth: u32) -> (f64, Chessboard) {
+fn engine_move(cb: Chessboard, depth: u32) -> (f32, Chessboard) {
     let is_white_turn = if let Color::White = cb.side_to_move {
         true
     } else {
         false
     };
-    let (score, best_cb) = nega_max_alpha_beta(&cb, depth, i32::MIN, i32::MAX);
+    let best_move = nega_max_alpha_beta_best_move(&cb, depth, is_white_turn, i32::MIN, i32::MAX);
+    let best_score = best_move.0;
     let float_score = if cb.side_to_move == Color::Black {
-        -score as f64 / 100.0
+        -best_score as f32 / 100.0
     } else {
-        score as f64 / 100.0
+        best_score as f32 / 100.0
     };
-    (float_score, best_cb)
+    (float_score, best_move.1)
 }
 
 // fn engine_move_best_line(cb: Chessboard, depth: u32) -> (f64, Vec<Chessboard>) {

@@ -3,12 +3,12 @@ use crate::chessboard::Chessboard;
 #[derive(Clone)]
 pub struct Move {
     pub chessboard: Chessboard,
-    pub score: u32
+    pub score: u32,
 }
 
 impl Move {
     pub fn new(chessboard: Chessboard, score: u32) -> Self {
-        Move { chessboard, score}
+        Move { chessboard, score }
     }
 }
 
@@ -23,7 +23,7 @@ impl MoveList {
     /// Creates a new MoveList from a vector of Chessboard moves.
     pub fn new(boards: Vec<Move>) -> Self {
         MoveList {
-        moves: boards,
+            moves: boards,
             next_index: 0,
         }
     }

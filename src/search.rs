@@ -6,6 +6,81 @@ use crate::{
     move_list::MoveList,
 };
 
+pub fn nega_max_alpha_beta_best_move(
+    cb: &Chessboard,
+    depth: u32,
+    is_white_turn: bool,
+    mut alpha: i32,
+    beta: i32,
+) -> (i32, Chessboard) {
+    // Base case: evaluate the board when depth is 0.
+    if depth == 0 {
+        // Directly return the evaluation and a clone of the board.
+        return quiescence_search_best_move(cb, is_white_turn, depth, alpha, beta);
+        // let eval = if is_white_turn { evaluate(cb) } else { -evaluate(cb) };
+        // return (eval, cb.clone());
+    }
+
+    // We'll track the best score and best resulting position.
+    let mut best_score = i32::MIN;
+    let mut best_pos: Chessboard = *cb;
+
+    // Generate the legal moves for the current side.
+    // (Assuming that white_legal_moves/black_legal_moves returns an iterator or slice.)
+    let mut legal_moves = if is_white_turn {
+        MoveList::new(white_legal_moves(cb))
+    } else {
+        MoveList::new(black_legal_moves(cb))
+    };
+
+    if legal_moves.moves.is_empty() {
+        let depth_adj = depth as i32;
+        const OVERFLOW_PROTECTOR: i32 = 1000;
+        let checkmate_score = if is_white_turn {
+            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
+        } else {
+            // i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
+            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
+        };
+        // let checkmate_score = if is_white_turn {
+        //     i32::MAX - 100
+        // } else {
+        //     i32::MIN + 100
+        // };
+        return (checkmate_score, *cb);
+    }
+
+    // Iterate over moves.
+    'legal_moves: while let Some(next_move) = legal_moves.next_move() {
+        // Extract the new position from the move.
+        let pos = next_move.chessboard;
+        // Negamax: invert alpha and beta for the recursive call.
+        let safe_beta = safe_neg(beta);
+        let safe_alpha = safe_neg(alpha);
+
+        // Recursively search the subtree.
+        let child_result = nega_max_alpha_beta_best_move(&pos, depth - 1, !is_white_turn, safe_beta, safe_alpha);
+
+        // Determine the score for this move.
+        let score = -child_result.0; // Negate the child's score.
+
+        // If this move is better, update the best score and best position.
+        if score > best_score {
+            best_score = score;
+            best_pos = pos;
+        }
+
+        // Update alpha and do a beta cutoff if possible.
+        alpha = alpha.max(score);
+        if alpha >= beta {
+            break 'legal_moves; // Beta cutoff.
+        }
+    }
+
+    // Return the best move (if any).
+    (best_score, best_pos)
+}
+
 pub fn nega_max_alpha_beta_best_line(
     cb: &Chessboard,
     depth: u32,
@@ -18,7 +93,7 @@ pub fn nega_max_alpha_beta_best_line(
         let score: i32 = evaluate(cb);
         // let final_score = if is_white_turn { score } else { -score };
         // return vec![(final_score, vec![cb.clone()])]; // No negation here
-        return quiescence_search(cb, is_white_turn, alpha, beta);
+        return quiescence_search_best_line(cb, is_white_turn, alpha, beta);
     }
 
     // Generate legal moves for the current side.
@@ -47,9 +122,9 @@ pub fn nega_max_alpha_beta_best_line(
             let depth_adj = depth as i32;
             const OVERFLOW_PROTECTOR: i32 = 1000;
             let checkmate_score = if is_white_turn {
-                i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
-            } else {
                 i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
+            } else {
+                i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
             };
             // let checkmate_score = if is_white_turn { i64::MAX  } else { i64::MIN  };
             return vec![(checkmate_score, vec![cb.clone(), pos])]; // Return an empty vector if no moves are found
@@ -81,7 +156,90 @@ pub fn nega_max_alpha_beta_best_line(
     best_line.map(|v| vec![v]).unwrap_or_else(Vec::new)
 }
 
-pub fn quiescence_search(
+pub fn quiescence_search_best_move(
+    cb: &Chessboard,
+    is_white_turn: bool,
+    depth: u32,
+    mut alpha: i32,
+    beta: i32,
+) -> (i32, Chessboard) {
+    // Do a static evaluation of the current (quiet) position.
+    // For black, invert the evaluation to maintain the negamax framework.
+    let stand_pat = if is_white_turn { evaluate(cb) } else { -evaluate(cb) };
+    let mut best_score = stand_pat;
+    // Default board is the current board (used if no move improves the evaluation)
+    let mut best_board = cb.clone();
+
+    // Fail-hard beta cutoff.
+    if best_score >= beta {
+        return (beta, best_board);
+    }
+    if alpha < best_score {
+        alpha = best_score;
+    }
+
+    let all_moves = if is_white_turn {
+        white_legal_moves(cb)
+    } else {
+        black_legal_moves(cb)
+    };
+
+    if all_moves.is_empty() {
+        let depth_adj = depth as i32;
+        const OVERFLOW_PROTECTOR: i32 = 1000;
+        let checkmate_score = if is_white_turn {
+            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
+        } else {
+            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
+            // i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
+        };
+        return (checkmate_score, best_board); // Return an empty vector if no moves are found
+    }
+
+    // Generate only "noisy" moves (e.g., captures).
+    let capture_moves: Vec<_> = all_moves.into_iter().filter(|m| m.score >= 6).collect();
+
+    if capture_moves.is_empty() {
+        return (best_score, best_board);
+    }
+
+    let mut not_quiet_moves = MoveList::new(capture_moves);
+
+    // Loop through each capture move.
+    while let Some(next_move) = not_quiet_moves.next_move() {
+        let pos = next_move.chessboard.clone();
+        // Swap bounds for the negamax recursion.
+        let safe_beta = safe_neg(beta);
+        let safe_alpha = safe_neg(alpha);
+        // Recurse: the returned board here is from the child's perspective.
+        // Since we want the immediate move (next_move.chessboard) at this level,
+        // we ignore the child's board state.
+        let child_result =
+            quiescence_search_best_move(&pos, !is_white_turn, depth - 1, safe_beta, safe_alpha);
+
+        // Invert the child's score (negamax style).
+        let score = -child_result.0;
+
+
+        // Beta cutoff: return immediately with the move that produced this cutoff.
+        if score >= beta {
+            return (beta, next_move.chessboard);
+        }
+
+        // If we find a move that improves alpha, update.
+        if score > alpha {
+            alpha = score;
+            best_score = score;
+            best_board = next_move.chessboard;
+        }
+    }
+
+    (best_score, best_board)
+}
+
+
+
+pub fn quiescence_search_best_line(
     cb: &Chessboard,
     is_white_turn: bool,
     mut alpha: i32,
@@ -128,7 +286,7 @@ pub fn quiescence_search(
         // Negamax: call quiescence search recursively with swapped bounds.
         let safe_beta = safe_neg(beta);
         let safe_alpha = safe_neg(alpha);
-        let child_results = quiescence_search(&pos, !is_white_turn, safe_beta, safe_alpha);
+        let child_results = quiescence_search_best_line(&pos, !is_white_turn, safe_beta, safe_alpha);
 
         if child_results.is_empty() {
             // If no moves are returned, treat it as a terminal position.
