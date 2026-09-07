@@ -409,3 +409,86 @@ fn warm_transposition_table_is_still_correct() {
     let cold = nega_max_alpha_beta_best_move(&cb, 5, true, A, B, &mut History::new()).0;
     assert_eq!(warm, cold, "a warmed table changed the depth-5 score");
 }
+
+/// Exhaustive check of the `make_move` path: for every from/to/promotion
+/// combination, it must play exactly the move asked for, or refuse.
+///
+/// `check_and_make_move.rs` is a second, hand-maintained copy of the move
+/// generator with "is this the requested destination?" filters woven in. Two
+/// shipped bugs were a branch that forgot its filter, so the branch answered
+/// every request that reached it: a capture-promotion returned a quiet
+/// promotion on the wrong square, and en passant hijacked a blocked push.
+/// Rather than test those two branches, this walks every branch at once.
+#[test]
+fn make_move_plays_exactly_what_was_asked() {
+    use chess_engine::notation::describe_move;
+    use chess_engine::piece::PromotionPiece;
+    use std::collections::HashSet;
+
+    let positions = [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+        "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+        "rnbqkbnr/ppp1pppp/4n3/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
+        "r1r5/1P6/8/8/8/8/8/4K2k w - - 0 1",
+        "4k3/8/8/8/8/8/1p6/R1R1K3 b - - 0 1",
+        "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+    ];
+    let promotions = [
+        None,
+        Some(PromotionPiece::Queen),
+        Some(PromotionPiece::Rook),
+        Some(PromotionPiece::Bishop),
+        Some(PromotionPiece::Knight),
+    ];
+
+    for fen in positions {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        let legal: HashSet<String> = legal_moves(&cb)
+            .iter()
+            .filter_map(|m| describe_move(&cb, &m.chessboard))
+            .collect();
+
+        for from in 0..64usize {
+            for to in 0..64usize {
+                for promotion in promotions {
+                    let mut asked = format!(
+                        "{}{}{}{}",
+                        (b'a' + (from % 8) as u8) as char,
+                        from / 8 + 1,
+                        (b'a' + (to % 8) as u8) as char,
+                        to / 8 + 1
+                    );
+                    if let Some(p) = promotion {
+                        asked.push(match p {
+                            PromotionPiece::Queen => 'q',
+                            PromotionPiece::Rook => 'r',
+                            PromotionPiece::Bishop => 'b',
+                            PromotionPiece::Knight => 'n',
+                        });
+                    }
+
+                    match cb.make_move(from, to, promotion) {
+                        Ok(after) => {
+                            let played = describe_move(&cb, &after).unwrap_or_default();
+                            // A promotion suffix on a move that does not promote
+                            // is meaningless, so only the squares are compared there.
+                            let ok = if played.len() == 5 || asked.len() == 4 {
+                                played == asked
+                            } else {
+                                played == asked[..4]
+                            };
+                            assert!(ok, "asked {asked} in {fen}, played {played}");
+                        }
+                        Err(_) => assert!(
+                            !legal.contains(&asked),
+                            "{asked} is legal in {fen} but make_move refused it"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
