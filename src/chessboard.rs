@@ -161,9 +161,6 @@ pub struct Chessboard {
 
     pub en_passant: SingletonBitboard,
 
-    pub white_occupancy: u64,
-    pub black_occupancy: u64,
-    pub occupancy: u64,
     pub piece_square: [ColoredPiece; 64],
 
     pub white_can_castle_king_side: bool,
@@ -192,10 +189,6 @@ impl Chessboard {
             black_queens: 0x0800000000000000,
             white_king: 0x0000000000000010,
             black_king: 0x1000000000000000,
-
-            white_occupancy: 0x000000000000FFFF,
-            black_occupancy: 0xFFFF000000000000,
-            occupancy: 0xFFFF00000000FFFF,
 
             #[rustfmt::skip]
             piece_square: [
@@ -241,8 +234,6 @@ impl Chessboard {
             | self.black_queens
             | self.white_king
             | self.black_king
-
-        // self.white_occupancy | self.black_occupancy
     }
 
     pub fn get_white_occupancy(&self) -> u64 {
@@ -252,8 +243,6 @@ impl Chessboard {
             | self.white_rooks
             | self.white_queens
             | self.white_king
-
-        // self.white_occupancy
     }
 
     pub fn get_black_occupancy(&self) -> u64 {
@@ -263,8 +252,6 @@ impl Chessboard {
             | self.black_rooks
             | self.black_queens
             | self.black_king
-
-        // self.black_occupancy
     }
 
     pub fn from_fen(fen: &str) -> Result<Self, String> {
@@ -398,14 +385,6 @@ impl Chessboard {
             .parse()
             .map_err(|_| "Invalid fullmove counter".to_string())?;
 
-        let white_occupancy =
-            white_pawns | white_knights | white_bishops | white_rooks | white_queens | white_king;
-
-        let black_occupancy =
-            black_pawns | black_knights | black_bishops | black_rooks | black_queens | black_king;
-
-        let occupancy = white_occupancy | black_occupancy;
-
         // Reject positions the move generator cannot represent. Without both
         // kings it indexes the king-attack table with square 64 and panics; and
         // if the side that just moved is still in check, its king can be
@@ -428,9 +407,6 @@ impl Chessboard {
             white_king,
             black_king,
             en_passant,
-            white_occupancy,
-            black_occupancy,
-            occupancy,
             piece_square,
             white_can_castle_king_side,
             white_can_castle_queen_side,
@@ -553,7 +529,6 @@ impl Chessboard {
             _ => panic!("Invalid piece"),
         }
 
-        self.white_occupancy &= !target;
 
         self.halfmove_clock = 0;
 
@@ -578,7 +553,6 @@ impl Chessboard {
             _ => panic!("Invalid piece {:?} on {} square", colored_piece, target),
         }
 
-        self.black_occupancy &= !target;
 
         self.halfmove_clock = 0;
 
@@ -605,8 +579,6 @@ impl Chessboard {
         new_chessboard.white_rooks &= !from;
         new_chessboard.white_rooks |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         // Rooks is moved rarely from initial position so we can skip both checks frequently
         // TODO: BENCHMARK DIFFERENCE
@@ -648,8 +620,6 @@ impl Chessboard {
         new_chessboard.black_rooks &= !from;
         new_chessboard.black_rooks |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         // Rooks is moved rarely from initial position so we can skip both checks frequently
         if from & BLACK_ROOKS_MASK != 0 {
@@ -687,8 +657,6 @@ impl Chessboard {
         new_chessboard.white_knights &= !from;
         new_chessboard.white_knights |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_black_occupancy();
@@ -720,8 +688,6 @@ impl Chessboard {
         new_chessboard.black_knights &= !from;
         new_chessboard.black_knights |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_white_occupancy();
@@ -754,8 +720,6 @@ impl Chessboard {
         new_chessboard.white_king &= !from;
         new_chessboard.white_king |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         new_chessboard.white_can_castle_king_side = false;
         new_chessboard.white_can_castle_queen_side = false;
@@ -786,8 +750,6 @@ impl Chessboard {
         new_chessboard.black_king &= !from;
         new_chessboard.black_king |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         new_chessboard.black_can_castle_king_side = false;
         new_chessboard.black_can_castle_queen_side = false;
@@ -819,8 +781,6 @@ impl Chessboard {
         new_chessboard.white_bishops &= !from;
         new_chessboard.white_bishops |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_black_occupancy();
@@ -852,8 +812,6 @@ impl Chessboard {
         new_chessboard.black_bishops &= !from;
         new_chessboard.black_bishops |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_white_occupancy();
@@ -886,8 +844,6 @@ impl Chessboard {
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         let from_square_index = from.trailing_zeros() as usize;
         let to_square_index = to.trailing_zeros() as usize;
@@ -911,8 +867,6 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         let from_square_index = from.trailing_zeros() as usize;
         let to_square_index = to.trailing_zeros() as usize;
@@ -937,8 +891,6 @@ impl Chessboard {
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         new_chessboard.en_passant = to >> 8;
 
@@ -964,8 +916,6 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         new_chessboard.en_passant = to << 8;
 
@@ -992,8 +942,6 @@ impl Chessboard {
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece
         new_chessboard.capture_black_piece(to);
@@ -1020,8 +968,6 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         // Capture enemy piece
         new_chessboard.capture_white_piece(to);
@@ -1052,7 +998,6 @@ impl Chessboard {
         new_chessboards[0].white_pawns &= !from;
         new_chessboards[0].white_queens |= to;
 
-        new_chessboards[0].white_occupancy |= to;
         
         new_chessboards[0].side_to_move = Color::Black;
         new_chessboards[0].piece_square[from_square_index] = ColoredPiece::Empty;
@@ -1064,7 +1009,6 @@ impl Chessboard {
         new_chessboards[1].white_pawns &= !from;
         new_chessboards[1].white_knights |= to;
 
-        new_chessboards[1].white_occupancy |= to;
         new_chessboards[1].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[1].piece_square[to_square_index] = ColoredPiece::WhiteKnight;
         new_chessboards[1].side_to_move = Color::Black;
@@ -1075,7 +1019,6 @@ impl Chessboard {
         new_chessboards[2].white_pawns &= !from;
         new_chessboards[2].white_bishops |= to;
 
-        new_chessboards[2].white_occupancy |= to;
         new_chessboards[2].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[2].piece_square[to_square_index] = ColoredPiece::WhiteBishop;
         new_chessboards[2].side_to_move = Color::Black;
@@ -1086,7 +1029,6 @@ impl Chessboard {
         new_chessboards[3].white_pawns &= !from;
         new_chessboards[3].white_rooks |= to;
 
-        new_chessboards[3].white_occupancy |= to;
         new_chessboards[3].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[3].piece_square[to_square_index] = ColoredPiece::WhiteRook;
         new_chessboards[3].side_to_move = Color::Black;
@@ -1110,7 +1052,6 @@ impl Chessboard {
         new_chessboards[0].black_pawns &= !from;
         new_chessboards[0].black_queens |= to;
 
-        new_chessboards[0].black_occupancy |= to;
         new_chessboards[0].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[0].piece_square[to_square_index] = ColoredPiece::BlackQueen;
         new_chessboards[0].side_to_move = Color::White;
@@ -1122,7 +1063,6 @@ impl Chessboard {
         new_chessboards[1].black_pawns &= !from;
         new_chessboards[1].black_knights |= to;
 
-        new_chessboards[1].black_occupancy |= to;
         new_chessboards[1].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[1].piece_square[to_square_index] = ColoredPiece::BlackKnight;
         new_chessboards[1].side_to_move = Color::White;
@@ -1134,7 +1074,6 @@ impl Chessboard {
         new_chessboards[2].black_pawns &= !from;
         new_chessboards[2].black_bishops |= to;
 
-        new_chessboards[2].black_occupancy |= to;
         new_chessboards[2].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[2].piece_square[to_square_index] = ColoredPiece::BlackBishop;
         new_chessboards[2].side_to_move = Color::White;
@@ -1146,7 +1085,6 @@ impl Chessboard {
         new_chessboards[3].black_pawns &= !from;
         new_chessboards[3].black_rooks |= to;
 
-        new_chessboards[3].black_occupancy |= to;
         new_chessboards[3].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[3].piece_square[to_square_index] = ColoredPiece::BlackRook;
         new_chessboards[3].side_to_move = Color::White;
@@ -1171,7 +1109,6 @@ impl Chessboard {
         new_chessboards[0].white_pawns &= !from;
         new_chessboards[0].white_queens |= to;
 
-        new_chessboards[0].white_occupancy |= to;
         new_chessboards[0].capture_black_piece(to);
         new_chessboards[0].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[0].piece_square[to_square_index] = ColoredPiece::WhiteQueen;
@@ -1183,7 +1120,6 @@ impl Chessboard {
         new_chessboards[1].white_pawns &= !from;
         new_chessboards[1].white_knights |= to;
 
-        new_chessboards[1].white_occupancy |= to;
         new_chessboards[1].capture_black_piece(to);
         new_chessboards[1].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[1].piece_square[to_square_index] = ColoredPiece::WhiteKnight;
@@ -1195,7 +1131,6 @@ impl Chessboard {
         new_chessboards[2].white_pawns &= !from;
         new_chessboards[2].white_bishops |= to;
 
-        new_chessboards[2].white_occupancy |= to;
         new_chessboards[2].capture_black_piece(to);
         new_chessboards[2].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[2].piece_square[to_square_index] = ColoredPiece::WhiteBishop;
@@ -1207,7 +1142,6 @@ impl Chessboard {
         new_chessboards[3].white_pawns &= !from;
         new_chessboards[3].white_rooks |= to;
 
-        new_chessboards[3].white_occupancy |= to;
         new_chessboards[3].capture_black_piece(to);
         new_chessboards[3].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[3].piece_square[to_square_index] = ColoredPiece::WhiteRook;
@@ -1231,7 +1165,6 @@ impl Chessboard {
         new_chessboards[0].black_pawns &= !from;
         new_chessboards[0].black_queens |= to;
 
-        new_chessboards[0].black_occupancy |= to;
         new_chessboards[0].capture_white_piece(to);
         new_chessboards[0].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[0].piece_square[to_square_index] = ColoredPiece::BlackQueen;
@@ -1244,7 +1177,6 @@ impl Chessboard {
         new_chessboards[1].black_pawns &= !from;
         new_chessboards[1].black_knights |= to;
 
-        new_chessboards[1].black_occupancy |= to;
         new_chessboards[1].capture_white_piece(to);
         new_chessboards[1].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[1].piece_square[to_square_index] = ColoredPiece::BlackKnight;
@@ -1257,7 +1189,6 @@ impl Chessboard {
         new_chessboards[2].black_pawns &= !from;
         new_chessboards[2].black_bishops |= to;
 
-        new_chessboards[2].black_occupancy |= to;
         new_chessboards[2].capture_white_piece(to);
         new_chessboards[2].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[2].piece_square[to_square_index] = ColoredPiece::BlackBishop;
@@ -1270,7 +1201,6 @@ impl Chessboard {
         new_chessboards[3].black_pawns &= !from;
         new_chessboards[3].black_rooks |= to;
 
-        new_chessboards[3].black_occupancy |= to;
         new_chessboards[3].capture_white_piece(to);
         new_chessboards[3].piece_square[from_square_index] = ColoredPiece::Empty;
         new_chessboards[3].piece_square[to_square_index] = ColoredPiece::BlackRook;
@@ -1293,8 +1223,6 @@ impl Chessboard {
         new_chessboard.white_queens &= !from;
         new_chessboard.white_queens |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_black_occupancy();
@@ -1325,8 +1253,6 @@ impl Chessboard {
         new_chessboard.black_queens &= !from;
         new_chessboard.black_queens |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         // Capture enemy piece if it exists
         let occupancy = self.get_white_occupancy();
@@ -1359,13 +1285,10 @@ impl Chessboard {
         new_chessboard.white_pawns &= !from;
         new_chessboard.white_pawns |= to;
 
-        new_chessboard.white_occupancy &= !from;
-        new_chessboard.white_occupancy |= to;
 
         // Capture the black pawn
         let captured_pawn: SingletonBitboard = to >> 8;
         new_chessboard.black_pawns &= !captured_pawn;
-        new_chessboard.black_occupancy &= !captured_pawn;
 
         let from_square_index = from.trailing_zeros() as usize;
         let to_square_index = to.trailing_zeros() as usize;
@@ -1391,13 +1314,10 @@ impl Chessboard {
         new_chessboard.black_pawns &= !from;
         new_chessboard.black_pawns |= to;
 
-        new_chessboard.black_occupancy &= !from;
-        new_chessboard.black_occupancy |= to;
 
         // Capture the white pawn
         let caputred_pawn: SingletonBitboard = to << 8;
         new_chessboard.white_pawns &= !caputred_pawn;
-        new_chessboard.white_occupancy &= !caputred_pawn;
 
         
         let from_square_index = from.trailing_zeros() as usize;
@@ -1423,7 +1343,6 @@ impl Chessboard {
         // Move the rook
         new_chessboard.white_rooks ^= WHITE_CASTLE_KINGSIDE_ROOK_MASK;
 
-        new_chessboard.white_occupancy ^= WHITE_KINGSIDE_CASTLE_OCCUPANCY_MASK;
 
         new_chessboard.white_can_castle_king_side = false;
         new_chessboard.white_can_castle_queen_side = false;
@@ -1448,7 +1367,6 @@ impl Chessboard {
         // Move the rook
         new_chessboard.black_rooks ^= BLACK_CASTLE_KINGSIDE_ROOK_MASK;
 
-        new_chessboard.black_occupancy ^= BLACK_KINGSIDE_CASTLE_OCCUPANCY_MASK;
 
         new_chessboard.black_can_castle_king_side = false;
         new_chessboard.black_can_castle_queen_side = false;
@@ -1474,7 +1392,6 @@ impl Chessboard {
         // Move the rook
         new_chessboard.white_rooks ^= WHITE_CASTLE_QUEENSIDE_ROOK_MASK;
 
-        new_chessboard.white_occupancy ^= WHITE_QUEENSIDE_CASTLE_OCCUPANCY_MASK;
 
         new_chessboard.white_can_castle_king_side = false;
         new_chessboard.white_can_castle_queen_side = false;
@@ -1499,7 +1416,6 @@ impl Chessboard {
         // Move the rook
         new_chessboard.black_rooks ^= BLACK_CASTLE_QUEENSIDE_ROOK_MASK;
 
-        new_chessboard.black_occupancy ^= BLACK_QUEENSIDE_CASTLE_OCCUPANCY_MASK;
 
         new_chessboard.black_can_castle_king_side = false;
         new_chessboard.black_can_castle_queen_side = false;
