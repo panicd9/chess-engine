@@ -13,10 +13,11 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-pub fn play() {
+/// Play against the engine in the terminal, starting from `start`.
+pub fn play(start: Chessboard) {
     const MAX_DEPTH: u32 = 7;
 
-    let mut cb = Chessboard::from_fen("rnbqkb1r/p3pppp/2p2n2/8/PppP4/2N1PN2/1P3PPP/R1BQKB1R w KQkq - 0 7").unwrap();
+    let mut cb = start;
     display_board(&cb);
 
     loop {
