@@ -1,0 +1,8 @@
+# Keep line endings stable across machines. Without this, committing from a
+# Windows checkout rewrites whole files as CRLF and buries real changes: the
+# "Fixes" commit touched 4 files but reported ~3400 changed lines in
+# chessboard.rs alone, all of it line-ending churn.
+#
+# Existing files are left alone until someone runs `git add --renormalize .`;
+# doing that in its own commit keeps it out of the way of real diffs.
+* text=auto eol=lf

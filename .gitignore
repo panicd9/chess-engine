@@ -37,3 +37,12 @@ target/
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,visualstudiocode
+
+### Profiling artifacts ###
+# `perf record` output and flamegraphs -- large binaries, regenerate locally.
+perf.data
+perf.data.old
+flamegraph.svg
+
+### Criterion benchmark output ###
+criterion/
