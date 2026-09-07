@@ -34,20 +34,7 @@ pub fn nega_max_alpha_beta_best_move(
     };
 
     if legal_moves.moves.is_empty() {
-        let depth_adj = depth as i32;
-        const OVERFLOW_PROTECTOR: i32 = 1000;
-        let checkmate_score = if is_white_turn {
-            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
-        } else {
-            // i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
-            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
-        };
-        // let checkmate_score = if is_white_turn {
-        //     i32::MAX - 100
-        // } else {
-        //     i32::MIN + 100
-        // };
-        return (checkmate_score, *cb);
+        return (terminal_score(cb, is_white_turn, depth), *cb);
     }
 
     // Iterate over moves.
@@ -119,15 +106,8 @@ pub fn nega_max_alpha_beta_best_line(
             safe_alpha,
         );
         if child_results.is_empty() {
-            let depth_adj = depth as i32;
-            const OVERFLOW_PROTECTOR: i32 = 1000;
-            let checkmate_score = if is_white_turn {
-                i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
-            } else {
-                i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
-            };
-            // let checkmate_score = if is_white_turn { i64::MAX  } else { i64::MIN  };
-            return vec![(checkmate_score, vec![cb.clone(), pos])]; // Return an empty vector if no moves are found
+            let score = terminal_score(cb, is_white_turn, depth);
+            return vec![(score, vec![cb.clone(), pos])];
         }
 
         // Assume that the best candidate from the child branch is the first one.
@@ -185,15 +165,7 @@ pub fn quiescence_search_best_move(
     };
 
     if all_moves.is_empty() {
-        let depth_adj = depth as i32;
-        const OVERFLOW_PROTECTOR: i32 = 1000;
-        let checkmate_score = if is_white_turn {
-            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
-        } else {
-            i32::MIN + (OVERFLOW_PROTECTOR - depth_adj)
-            // i32::MAX - (OVERFLOW_PROTECTOR - depth_adj)
-        };
-        return (checkmate_score, best_board); // Return an empty vector if no moves are found
+        return (terminal_score(cb, is_white_turn, depth), best_board);
     }
 
     // Generate only "noisy" moves (e.g., captures).
@@ -319,6 +291,31 @@ pub fn quiescence_search_best_line(
     vec![(best_score, best_line)]
 }
 
+
+/// Score for a node where the side to move has no legal reply.
+///
+/// Checkmate is a loss for the side to move; stalemate is a draw and must score
+/// 0, not a loss, or the engine happily stalemates a won position. The score is
+/// relative to the side to move, so it does not depend on colour. Mates found
+/// nearer the root (larger `depth`) score worse, so the search prefers the
+/// slowest loss and the fastest win.
+pub fn terminal_score(cb: &Chessboard, is_white_turn: bool, depth: u32) -> i32 {
+    let in_check = if is_white_turn {
+        cb.is_white_king_under_attack()
+    } else {
+        cb.is_black_king_under_attack()
+    };
+
+    if !in_check {
+        return DRAW; // Stalemate.
+    }
+
+    const OVERFLOW_PROTECTOR: i32 = 1000;
+    i32::MIN + (OVERFLOW_PROTECTOR - depth as i32)
+}
+
+/// Score of a drawn position, from either side's point of view.
+pub const DRAW: i32 = 0;
 
 fn safe_neg(value: i32) -> i32 {
     if value == i32::MIN {
