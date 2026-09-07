@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
 use crate::{
     chessboard::Chessboard,
     display::display_board_string,
@@ -6,6 +8,32 @@ use crate::{
     move_list::MoveList,
 };
 
+/// Set to ask an in-flight search to give up as soon as it can. The scores it
+/// returns after this point are meaningless, so whoever sets it must discard the
+/// current iteration and fall back on the last completed one.
+pub static STOP: AtomicBool = AtomicBool::new(false);
+
+/// Nodes visited since [`reset_nodes`]. Reported as `nodes`/`nps` over UCI.
+pub static NODES: AtomicU64 = AtomicU64::new(0);
+
+pub fn reset_nodes() {
+    NODES.store(0, Ordering::Relaxed);
+}
+
+pub fn nodes_searched() -> u64 {
+    NODES.load(Ordering::Relaxed)
+}
+
+/// Count this node and report whether the search has been asked to stop.
+///
+/// The stop flag is only polled every 2048 nodes: an atomic load per node is
+/// cheap but not free, and 2048 nodes is well under a millisecond.
+#[inline]
+fn count_node_and_should_stop() -> bool {
+    let seen = NODES.fetch_add(1, Ordering::Relaxed);
+    seen & 0x7FF == 0 && STOP.load(Ordering::Relaxed)
+}
+
 pub fn nega_max_alpha_beta_best_move(
     cb: &Chessboard,
     depth: u32,
@@ -13,6 +41,11 @@ pub fn nega_max_alpha_beta_best_move(
     mut alpha: i32,
     beta: i32,
 ) -> (i32, Chessboard) {
+    if count_node_and_should_stop() {
+        // Unwind immediately. The caller discards this iteration's result.
+        return (0, *cb);
+    }
+
     // Base case: evaluate the board when depth is 0.
     if depth == 0 {
         // Directly return the evaluation and a clone of the board.
@@ -143,6 +176,10 @@ pub fn quiescence_search_best_move(
     mut alpha: i32,
     beta: i32,
 ) -> (i32, Chessboard) {
+    if count_node_and_should_stop() {
+        return (0, *cb);
+    }
+
     // Do a static evaluation of the current (quiet) position.
     // For black, invert the evaluation to maintain the negamax framework.
     let stand_pat = if is_white_turn { evaluate(cb) } else { -evaluate(cb) };

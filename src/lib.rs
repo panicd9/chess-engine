@@ -13,3 +13,5 @@ pub mod iterative_deepening;
 pub mod playing_ui;
 pub mod move_list;
 pub mod move_ordering;
+pub mod notation;
+pub mod uci;

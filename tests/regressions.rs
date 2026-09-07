@@ -200,3 +200,52 @@ fn capture_promotions_produce_all_four_pieces() {
         assert!(promoted.contains(&wanted), "no capture-promotion to {wanted:?}");
     }
 }
+
+// --- notation round trip ----------------------------------------------------
+
+/// Every legal move must survive being written as UCI and read back: describe
+/// it, parse it, apply it, and land on exactly the same position. This is what
+/// the UCI layer relies on, and it is where castling (two pieces move), en
+/// passant (a piece vanishes off the destination square) and promotion (the
+/// arriving piece is not the one that left) all get exercised at once.
+#[test]
+fn describe_and_parse_round_trip() {
+    use chess_engine::display::to_fen;
+    use chess_engine::notation::{describe_move, parse_move};
+
+    let positions = [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        // Castling both ways, both colours.
+        "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+        "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1",
+        // Promotions, including capture-promotions.
+        "r1r5/1P6/8/8/8/8/8/4K2k w - - 0 1",
+        "4k3/8/8/8/8/8/1p6/R1R1K3 b - - 0 1",
+        // En passant available.
+        "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+        // Dense middlegame.
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    ];
+
+    let mut checked = 0;
+    for fen in positions {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        for m in legal_moves(&cb) {
+            let text = describe_move(&cb, &m.chessboard)
+                .unwrap_or_else(|| panic!("could not describe a move in {fen}"));
+            let parsed = parse_move(&text)
+                .unwrap_or_else(|e| panic!("`{text}` from {fen} did not parse back: {e}"));
+            let replayed = cb
+                .make_move(parsed.from, parsed.to, parsed.promotion)
+                .unwrap_or_else(|e| panic!("`{text}` from {fen} was rejected: {e}"));
+            assert_eq!(
+                to_fen(&replayed),
+                to_fen(&m.chessboard),
+                "`{text}` from {fen} replayed to a different position"
+            );
+            checked += 1;
+        }
+    }
+    println!("round-tripped {checked} moves");
+    assert!(checked > 150, "expected a broad sample of moves, only saw {checked}");
+}
