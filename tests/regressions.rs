@@ -47,3 +47,22 @@ fn quiescence_depth_does_not_underflow() {
     let (score, _) = nega_max_alpha_beta_best_move(&cb, 3, true, A, B);
     println!("search completed, score {score}");
 }
+
+/// Positions that are not legal chess used to be accepted, and then crashed the
+/// move generator: the waiting side's king can be captured, and generating moves
+/// for the resulting king-less board indexes KING_ATTACKS[64].
+#[test]
+fn illegal_fens_are_rejected() {
+    assert!(Chessboard::from_fen("7k/6Q1/6K1/8/8/8/8/8 w - - 0 1").is_err(),
+        "waiting side in check");
+    assert!(Chessboard::from_fen("7k/8/8/8/8/8/8/8 w - - 0 1").is_err(), "no white king");
+    assert!(Chessboard::from_fen("4k3/8/8/8/8/8/8/8 w - - 0 1").is_err(), "no white king");
+    // Legal positions still parse.
+    for fen in [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    ] {
+        assert!(Chessboard::from_fen(fen).is_ok(), "{fen} should parse");
+    }
+}

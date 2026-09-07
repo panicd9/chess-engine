@@ -406,7 +406,15 @@ impl Chessboard {
 
         let occupancy = white_occupancy | black_occupancy;
 
-        Ok(Self {
+        // Reject positions the move generator cannot represent. Without both
+        // kings it indexes the king-attack table with square 64 and panics; and
+        // if the side that just moved is still in check, its king can be
+        // captured, producing exactly that king-less position one ply later.
+        if white_king.count_ones() != 1 || black_king.count_ones() != 1 {
+            return Err("Invalid FEN: each side needs exactly one king".to_string());
+        }
+
+        let board = Self {
             white_pawns,
             black_pawns,
             white_knights,
@@ -431,7 +439,17 @@ impl Chessboard {
             side_to_move,
             halfmove_clock,
             fullmove_counter,
-        })
+        };
+
+        let waiting_side_in_check = match board.side_to_move {
+            Color::White => board.is_black_king_under_attack(),
+            Color::Black => board.is_white_king_under_attack(),
+        };
+        if waiting_side_in_check {
+            return Err("Invalid FEN: the side that just moved is left in check".to_string());
+        }
+
+        Ok(board)
     }
 
     pub fn make_move(
