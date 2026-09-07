@@ -358,3 +358,54 @@ fn move_ordering_does_not_change_the_result() {
         );
     }
 }
+
+/// The table must not break tactics: where there is one clearly best move, it
+/// still has to be found, and a mate still has to be seen.
+///
+/// Note what is deliberately NOT asserted: that scores are bit-identical with
+/// and without the table. They are not always, and that is a property of the
+/// search rather than a bug in the table -- quiescence returns bounds rather
+/// than exact values, so a node above it can cache a score that was only exact
+/// for the window it was searched with. Every engine with a table and a
+/// quiescence search has this. It shows up as an occasional different-but-
+/// equal-valued move, not as a wrong move.
+#[test]
+fn transposition_table_preserves_tactics() {
+    // Some positions have several equally best moves -- the two rooks below are
+    // symmetric -- so each case lists every acceptable answer.
+    for (fen, acceptable) in [
+        ("6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1", &["a1a8"][..]), // mate in 1
+        ("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4", &["f3f7"][..]),
+        // Capture-promotion: either rook, both winning a rook and queening.
+        ("r1r5/1P6/8/8/8/8/8/4K2k w - - 0 1", &["b7a8q", "b7c8q"][..]),
+    ] {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        let mut state = History::new();
+        state.ensure_table(16);
+        let (_, pos) = nega_max_alpha_beta_best_move(&cb, 5, true, A, B, &mut state);
+        let played = chess_engine::notation::describe_move(&cb, &pos).unwrap();
+        assert!(
+            acceptable.contains(&played.as_str()),
+            "table lost the best move in {fen}: played {played}, expected one of {acceptable:?}"
+        );
+    }
+}
+
+/// Entries have to survive between the iterations of a deepening search -- that
+/// is the whole point -- so a warm table must still give the same answer.
+#[test]
+fn warm_transposition_table_is_still_correct() {
+    let cb = Chessboard::from_fen(
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10").unwrap();
+    let mut state = History::new();
+    state.ensure_table(16);
+
+    // Deepen the way the UCI driver does, then confirm the deepest answer
+    // matches a cold search to the same depth.
+    let mut warm = 0;
+    for depth in 1..=5 {
+        warm = nega_max_alpha_beta_best_move(&cb, depth, true, A, B, &mut state).0;
+    }
+    let cold = nega_max_alpha_beta_best_move(&cb, 5, true, A, B, &mut History::new()).0;
+    assert_eq!(warm, cold, "a warmed table changed the depth-5 score");
+}

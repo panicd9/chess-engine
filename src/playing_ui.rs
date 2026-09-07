@@ -84,6 +84,7 @@ pub fn play(start: Chessboard) {
         let start_time = std::time::Instant::now();
         // let best_lines = engine_move_best_5_lines(cb, MAX_DEPTH);
 
+        history.ensure_table(64);
         let best_move = engine_move(cb, MAX_DEPTH, &mut history);
         let best_lines = vec![(best_move.0, vec![cb, best_move.1])];
         let elapsed = start_time.elapsed();

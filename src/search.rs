@@ -5,8 +5,37 @@ use crate::{
     eval::evaluate,
     move_gen::{black_legal_moves, white_legal_moves},
     move_list::MoveList,
+    tt::TranspositionTable,
     zobrist,
 };
+
+/// Identifies a move by the squares the moving side vacated and filled. Small
+/// enough to store, cheap enough to compute per move. See [`move_key`].
+pub type MoveKey = u64;
+
+/// What a stored score tells us about the true value of a position.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Bound {
+    /// The search returned a value inside its window: this is the real score.
+    Exact,
+    /// The search cut off: the true score is at least this.
+    Lower,
+    /// No move beat alpha: the true score is at most this.
+    Upper,
+}
+
+/// Scores at least this extreme encode a mate rather than an evaluation.
+///
+/// Mate scores are relative to the depth they were found at, not to the root,
+/// so reusing one at a different depth would report the wrong distance. They
+/// are never stored or returned from the table; only the move is kept. Fixing
+/// this properly means storing mates relative to ply, which is worth doing
+/// alongside a real mate-distance rewrite rather than bolted on here.
+const MATE_SCORE_THRESHOLD: i32 = i32::MAX - 2 * 1000;
+
+fn is_mate_score(score: i32) -> bool {
+    score > MATE_SCORE_THRESHOLD || score < -MATE_SCORE_THRESHOLD
+}
 
 /// Half-moves without a capture or a pawn move after which the game is drawn.
 pub const FIFTY_MOVE_PLIES: u32 = 100;
@@ -33,6 +62,12 @@ pub struct History {
     /// [`move_key`] -- because `Move` carries a whole board rather than a
     /// from/to pair.
     killers: Box<[[u64; 2]; MAX_PLY]>,
+    /// What earlier searches -- including shallower iterative-deepening
+    /// iterations -- concluded about positions seen along the way.
+    pub table: TranspositionTable,
+    /// Set while the score currently being computed depends on the moves played
+    /// to reach it rather than on the position alone. See [`History::table`].
+    path_dependent: bool,
 }
 
 impl Default for History {
@@ -46,6 +81,17 @@ impl History {
         History {
             keys: Vec::with_capacity(64),
             killers: Box::new([[0; 2]; MAX_PLY]),
+            // Left empty so cloning a game history stays cheap; the search
+            // driver sizes it once before searching.
+            table: TranspositionTable::new(0),
+            path_dependent: false,
+        }
+    }
+
+    /// Give this search a transposition table, if it has not got one already.
+    pub fn ensure_table(&mut self, megabytes: usize) {
+        if !self.table.is_enabled() {
+            self.table = TranspositionTable::new(megabytes);
         }
     }
 
@@ -168,6 +214,19 @@ fn search_node(
         return (0, *cb);
     }
 
+    // What do we already know about this position? A usable score ends the
+    // node outright; otherwise the stored move still tells us what to try first.
+    let key = zobrist::hash(cb);
+    let mut tt_move: MoveKey = 0;
+    if let Some(hit) = history.table.probe(key, depth, alpha, beta) {
+        tt_move = hit.best_move;
+        if let Some(score) = hit.score {
+            if !is_mate_score(score) {
+                return (score, *cb);
+            }
+        }
+    }
+
     // We'll track the best score and best resulting position.
     let mut best_score = i32::MIN;
     let mut best_pos: Chessboard = *cb;
@@ -192,16 +251,24 @@ fn search_node(
     } else {
         cb.get_black_occupancy()
     };
-    if ply < MAX_PLY {
-        for m in &mut legal_moves.moves {
-            if m.score < KILLER_BONUS
-                && history.is_killer(ply, move_key(parent_occupancy, &m.chessboard, is_white_turn))
-            {
-                m.score = KILLER_BONUS;
-            }
+    for m in &mut legal_moves.moves {
+        let key = move_key(parent_occupancy, &m.chessboard, is_white_turn);
+        if tt_move != 0 && key == tt_move {
+            // Whatever was best here last time goes first, ahead of every
+            // capture. This is what makes the shallower iterations pay off.
+            m.score = TT_MOVE_BONUS;
+        } else if m.score < KILLER_BONUS && ply < MAX_PLY && history.is_killer(ply, key) {
+            m.score = KILLER_BONUS;
         }
     }
 
+
+    let original_alpha = alpha;
+    let mut best_move: MoveKey = 0;
+    let mut cutoff = false;
+    // Save and reset so the flag reports only what happened below this node.
+    let outer_path_dependent = history.path_dependent;
+    history.path_dependent = false;
 
     // Iterate over moves.
     'legal_moves: while let Some(next_move) = legal_moves.next_move() {
@@ -217,6 +284,9 @@ fn search_node(
         // the child, so mating on the hundredth half-move still wins.
         history.push(cb);
         let score = if history.repeats(&pos) || pos.halfmove_clock >= FIFTY_MOVE_PLIES {
+            // Whether this is a draw depends on the moves played to get here,
+            // not on the position, so nothing on this path may be cached.
+            history.path_dependent = true;
             DRAW
         } else {
             let child_result = search_node(
@@ -236,6 +306,7 @@ fn search_node(
         if score > best_score {
             best_score = score;
             best_pos = pos;
+            best_move = move_key(parent_occupancy, &pos, is_white_turn);
         }
 
         // Update alpha and do a beta cutoff if possible.
@@ -248,11 +319,32 @@ fn search_node(
             if next_move.score < KILLER_BONUS {
                 history.store_killer(ply, move_key(parent_occupancy, &pos, is_white_turn));
             }
+            cutoff = true;
             break 'legal_moves; // Beta cutoff.
         }
     }
 
-    // Return the best move (if any).
+    // Record what this node concluded. `bound` says how much to trust it: a
+    // cutoff only proves the score is at least this, and a node where nothing
+    // beat alpha only proves it is at most this.
+    //
+    // A score that came from a repetition or the fifty-move rule is a property
+    // of this path, not of the position, so it is not cached -- another route
+    // to the same position may not be a draw at all.
+    if !is_mate_score(best_score) && !history.path_dependent {
+        let bound = if cutoff {
+            Bound::Lower
+        } else if best_score <= original_alpha {
+            Bound::Upper
+        } else {
+            Bound::Exact
+        };
+        history.table.store(key, depth, best_score, bound, best_move);
+    }
+
+    // Propagate upwards: our caller's score depends on ours.
+    history.path_dependent |= outer_path_dependent;
+
     (best_score, best_pos)
 }
 
@@ -339,9 +431,12 @@ pub fn quiescence_search_best_move(
     // Default board is the current board (used if no move improves the evaluation)
     let mut best_board = cb.clone();
 
-    // Fail-hard beta cutoff.
+    // Fail-soft: return what was actually found, not the window edge. A clamped
+    // `beta` here is not a real score, and a node above that stores a value
+    // derived from one would cache something only valid for this window --
+    // which is exactly what breaks the transposition table.
     if best_score >= beta {
-        return (beta, best_board);
+        return (best_score, best_board);
     }
     if alpha < best_score {
         alpha = best_score;
@@ -384,9 +479,10 @@ pub fn quiescence_search_best_move(
         let score = -child_result.0;
 
 
-        // Beta cutoff: return immediately with the move that produced this cutoff.
+        // Beta cutoff: return immediately with the move that produced this
+        // cutoff. Fail-soft, for the reason given above.
         if score >= beta {
-            return (beta, next_move.chessboard);
+            return (score, next_move.chessboard);
         }
 
         // If we find a move that improves alpha, update.
@@ -522,6 +618,10 @@ fn move_key(parent_occupancy: u64, child: &Chessboard, is_white_turn: bool) -> u
 /// Ordering bonus for a killer move: above every quiet move, below every
 /// capture, so MVV-LVA still leads.
 const KILLER_BONUS: u32 = 9;
+
+/// Ordering bonus for the table's move, which outranks everything: it is the
+/// best move a previous, usually deeper, search found here.
+const TT_MOVE_BONUS: u32 = 1000;
 
 /// Score of a drawn position, from either side's point of view.
 pub const DRAW: i32 = 0;

@@ -26,6 +26,9 @@ const MAX_DEPTH: u32 = 64;
 /// Assumed remaining moves when the GUI does not send `movestogo`.
 const EXPECTED_MOVES_LEFT: u64 = 30;
 
+/// Transposition table size. Not yet exposed as a UCI `Hash` option.
+const TABLE_MEGABYTES: usize = 64;
+
 /// Held back from every time budget for process and I/O jitter.
 const SAFETY_MARGIN: Duration = Duration::from_millis(30);
 
@@ -152,6 +155,7 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History) {
     let is_white = board.side_to_move == Color::White;
     let max_depth = limits.depth.unwrap_or(MAX_DEPTH);
     search::reset_nodes();
+    history.ensure_table(TABLE_MEGABYTES);
 
     let mut best: Option<Chessboard> = None;
 
