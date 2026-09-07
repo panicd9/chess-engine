@@ -15,3 +15,4 @@ pub mod move_list;
 pub mod move_ordering;
 pub mod notation;
 pub mod uci;
+pub mod zobrist;

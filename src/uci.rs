@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crate::chessboard::{Chessboard, Color};
 use crate::move_gen::legal_moves;
 use crate::notation::{describe_move, parse_move};
-use crate::search::{self, nega_max_alpha_beta_best_move};
+use crate::search::{self, History, nega_max_alpha_beta_best_move};
 
 const NAME: &str = concat!("chess-engine ", env!("CARGO_PKG_VERSION"));
 const AUTHOR: &str = "Darko Panic";
@@ -67,6 +67,7 @@ impl Limits {
 
 pub fn run() -> io::Result<()> {
     let mut board = Chessboard::new_initial_board();
+    let mut history = History::new();
     let mut worker: Option<thread::JoinHandle<()>> = None;
 
     let stdin = io::stdin();
@@ -85,18 +86,23 @@ pub fn run() -> io::Result<()> {
             "ucinewgame" => {
                 stop_search(&mut worker);
                 board = Chessboard::new_initial_board();
+                history = History::new();
             }
             "position" => {
                 stop_search(&mut worker);
                 match parse_position(&line) {
-                    Ok(parsed) => board = parsed,
+                    Ok((parsed, played)) => {
+                        board = parsed;
+                        history = played;
+                    }
                     Err(err) => eprintln!("info string bad position: {err}"),
                 }
             }
             "go" => {
                 stop_search(&mut worker);
                 let limits = parse_go(&line);
-                worker = Some(thread::spawn(move || search_and_report(board, limits)));
+                let history = history.clone();
+                worker = Some(thread::spawn(move || search_and_report(board, limits, history)));
             }
             "stop" => stop_search(&mut worker),
             "quit" => {
@@ -126,7 +132,7 @@ fn stop_search(worker: &mut Option<thread::JoinHandle<()>>) {
 /// Iterative deepening. Each completed depth replaces the move to play; a depth
 /// cut short by the clock is thrown away, because its score came from a
 /// half-searched tree.
-fn search_and_report(board: Chessboard, limits: Limits) {
+fn search_and_report(board: Chessboard, limits: Limits, mut history: History) {
     let started = Instant::now();
     let budget = limits.budget(board.side_to_move);
     let deadline = budget.map(|b| started + b);
@@ -150,13 +156,24 @@ fn search_and_report(board: Chessboard, limits: Limits) {
     let mut best: Option<Chessboard> = None;
 
     for depth in 1..=max_depth {
-        let (score, position) =
-            nega_max_alpha_beta_best_move(&board, depth, is_white, i32::MIN + 1, i32::MAX - 1);
+        let (score, position) = nega_max_alpha_beta_best_move(
+            &board,
+            depth,
+            is_white,
+            i32::MIN + 1,
+            i32::MAX - 1,
+            &mut history,
+        );
 
         if search::STOP.load(Ordering::Relaxed) {
             break; // Result is from an abandoned tree; keep the previous depth.
         }
 
+        // A result that names no move means the search had nothing to play;
+        // keep whatever the last real iteration found.
+        if describe_move(&board, &position).is_none() {
+            break;
+        }
         best = Some(position);
         report_info(&board, &position, score, depth, started);
 
@@ -221,7 +238,9 @@ fn report_info(
     let _ = io::stdout().flush();
 }
 
-fn parse_position(line: &str) -> Result<Chessboard, String> {
+/// Parse a `position` command into the position and the history of everything
+/// played to reach it, which is what repetition detection needs.
+fn parse_position(line: &str) -> Result<(Chessboard, History), String> {
     let rest = line.trim_start().trim_start_matches("position").trim();
 
     let (mut board, after_position) = if let Some(rest) = rest.strip_prefix("startpos") {
@@ -238,16 +257,18 @@ fn parse_position(line: &str) -> Result<Chessboard, String> {
         return Err(format!("expected `startpos` or `fen`, got `{rest}`"));
     };
 
+    let mut history = History::new();
     if let Some(moves) = after_position.trim_start().strip_prefix("moves") {
         for text in moves.split_whitespace() {
             let parsed = parse_move(text).map_err(|e| format!("{text}: {e}"))?;
+            history.push(&board);
             board = board
                 .make_move(parsed.from, parsed.to, parsed.promotion)
                 .map_err(|e| format!("{text}: {e}"))?;
         }
     }
 
-    Ok(board)
+    Ok((board, history))
 }
 
 fn parse_go(line: &str) -> Limits {

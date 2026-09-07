@@ -5,7 +5,7 @@ use crate::{
         iterative_deepening_best_5_lines_with_interupt_support, start_key_listener,
     },
     notation::{describe_move, parse_move},
-    search::{nega_max_alpha_beta_best_line, nega_max_alpha_beta_best_move},
+    search::{History, nega_max_alpha_beta_best_line, nega_max_alpha_beta_best_move},
 };
 use crossterm::style::{Attribute, Color as TextColor, ResetColor, SetBackgroundColor, SetForegroundColor};
 use std::{
@@ -18,6 +18,8 @@ pub fn play(start: Chessboard) {
     const MAX_DEPTH: u32 = 7;
 
     let mut cb = start;
+    // Every position reached, so the engine can see repetitions coming.
+    let mut history = History::new();
     display_board(&cb);
 
     loop {
@@ -64,6 +66,7 @@ pub fn play(start: Chessboard) {
 
         match cb.make_move(parsed.from, parsed.to, parsed.promotion) {
             Ok(new_cb) => {
+                history.push(&cb);
                 println!("You played {}!", input);
                 display_board(&new_cb);
                 cb = new_cb;
@@ -81,7 +84,7 @@ pub fn play(start: Chessboard) {
         let start_time = std::time::Instant::now();
         // let best_lines = engine_move_best_5_lines(cb, MAX_DEPTH);
 
-        let best_move = engine_move(cb, MAX_DEPTH);
+        let best_move = engine_move(cb, MAX_DEPTH, &mut history);
         let best_lines = vec![(best_move.0, vec![cb, best_move.1])];
         let elapsed = start_time.elapsed();
 
@@ -162,6 +165,7 @@ pub fn play(start: Chessboard) {
 
         display_board(&new_cb);
 
+        history.push(&cb);
         cb = new_cb;
     }
 }
@@ -234,13 +238,14 @@ fn engine_move_best_5_lines(cb: Chessboard, depth: u32) -> Vec<(f32, Vec<Chessbo
     best_5_lines_with_scores
 }
 
-fn engine_move(cb: Chessboard, depth: u32) -> (f32, Chessboard) {
+fn engine_move(cb: Chessboard, depth: u32, history: &mut History) -> (f32, Chessboard) {
     let is_white_turn = if let Color::White = cb.side_to_move {
         true
     } else {
         false
     };
-    let best_move = nega_max_alpha_beta_best_move(&cb, depth, is_white_turn, i32::MIN, i32::MAX);
+    let best_move =
+        nega_max_alpha_beta_best_move(&cb, depth, is_white_turn, i32::MIN, i32::MAX, history);
     let best_score = best_move.0;
     let float_score = if cb.side_to_move == Color::Black {
         -best_score as f32 / 100.0

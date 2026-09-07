@@ -1,7 +1,7 @@
 use chess_engine::chessboard::Chessboard;
 use chess_engine::display::to_fen;
 use chess_engine::move_gen::legal_moves;
-use chess_engine::search::nega_max_alpha_beta_best_move;
+use chess_engine::search::{History, nega_max_alpha_beta_best_move};
 
 const A: i32 = i32::MIN + 1;
 const B: i32 = i32::MAX - 1;
@@ -10,7 +10,7 @@ const B: i32 = i32::MAX - 1;
 fn stalemate_is_a_draw() {
     let cb = Chessboard::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1").unwrap();
     assert!(legal_moves(&cb).is_empty());
-    let (score, _) = nega_max_alpha_beta_best_move(&cb, 1, false, A, B);
+    let (score, _) = nega_max_alpha_beta_best_move(&cb, 1, false, A, B, &mut History::new());
     println!("stalemate scores {score}");
     assert_eq!(score, 0);
 }
@@ -19,7 +19,7 @@ fn stalemate_is_a_draw() {
 fn prefers_mate_over_stalemate() {
     let cb = Chessboard::from_fen("7k/8/6K1/8/8/8/5Q2/8 w - - 0 1").unwrap();
     for depth in 2..=4u32 {
-        let (score, next) = nega_max_alpha_beta_best_move(&cb, depth, true, A, B);
+        let (score, next) = nega_max_alpha_beta_best_move(&cb, depth, true, A, B, &mut History::new());
         let no_moves = legal_moves(&next).is_empty();
         let stalemate = no_moves && !next.is_black_king_under_attack();
         let mate = no_moves && next.is_black_king_under_attack();
@@ -33,7 +33,7 @@ fn prefers_mate_over_stalemate() {
 #[test]
 fn still_finds_checkmate() {
     let cb = Chessboard::from_fen("6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1").unwrap();
-    let (score, next) = nega_max_alpha_beta_best_move(&cb, 3, true, A, B);
+    let (score, next) = nega_max_alpha_beta_best_move(&cb, 3, true, A, B, &mut History::new());
     println!("mate search: {} score {score}", to_fen(&next));
     assert!(legal_moves(&next).is_empty() && next.is_black_king_under_attack(), "should be mate");
 }
@@ -44,7 +44,7 @@ fn still_finds_checkmate() {
 fn quiescence_depth_does_not_underflow() {
     let cb = Chessboard::from_fen(
         "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10").unwrap();
-    let (score, _) = nega_max_alpha_beta_best_move(&cb, 3, true, A, B);
+    let (score, _) = nega_max_alpha_beta_best_move(&cb, 3, true, A, B, &mut History::new());
     println!("search completed, score {score}");
 }
 
@@ -269,4 +269,62 @@ fn make_move_rejects_moves_it_cannot_play() {
         "rnbqkbnr/pppp1ppp/8/8/3pP3/3N4/PPPP1PPP/R1BQKBNR b KQkq e3 0 3").unwrap();
     assert!(cb.make_move(27, 19, None).is_err(), "blocked d4d3 must be rejected");
     assert!(cb.make_move(27, 20, None).is_ok(), "d4e3 e.p. should be legal");
+}
+
+// --- draw detection ---------------------------------------------------------
+
+/// A repetition must score as a draw, so a side that is winning does not walk
+/// into one and a side that is losing can steer towards it.
+#[test]
+fn repetition_scores_as_a_draw() {
+    use chess_engine::notation::parse_move;
+
+    // Black is a queen up and completely winning. If White shuffles its rook,
+    // Black repeating would throw the win away.
+    let start = Chessboard::from_fen("6k1/5ppp/8/8/8/8/q4PPP/4R1K1 w - - 10 40").unwrap();
+
+    // Build the history of a shuffle that has already happened once:
+    // Re1-e2 Qa2-a1 Re2-e1 Qa1-a2 returns to `start` with White to move.
+    let mut history = History::new();
+    let mut board = start;
+    for uci in ["e1e2", "a2a1", "e2e1", "a1a2"] {
+        let m = parse_move(uci).unwrap();
+        history.push(&board);
+        board = board.make_move(m.from, m.to, m.promotion).unwrap();
+    }
+
+    // `board` is now the same position as `start`, seen a second time.
+    assert_eq!(
+        chess_engine::zobrist::hash(&board),
+        chess_engine::zobrist::hash(&start),
+        "the shuffle should return to the same position"
+    );
+    assert!(history.repeats(&board), "the repetition should be detected");
+}
+
+/// The fifty-move rule has to be a draw, but delivering mate on the hundredth
+/// half-move still wins.
+#[test]
+fn fifty_move_rule_is_a_draw_but_mate_still_wins() {
+    // Black is a queen up, but the halfmove clock has run out.
+    let drawn = Chessboard::from_fen("6k1/5ppp/8/8/8/8/q4PPP/4R1K1 w - - 100 80").unwrap();
+    let (score, _) = nega_max_alpha_beta_best_move(&drawn, 2, true, A, B, &mut History::new());
+    assert_eq!(score, 0, "fifty-move rule should be a draw, not a loss");
+
+    // Same clock, but White is being mated: the mate takes priority.
+    let mated = Chessboard::from_fen(
+        "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 100 80").unwrap();
+    assert!(legal_moves(&mated).is_empty(), "should be checkmate");
+    let (score, _) = nega_max_alpha_beta_best_move(&mated, 2, true, A, B, &mut History::new());
+    assert!(score < -(1 << 19), "checkmate must outrank the fifty-move draw, got {score}");
+}
+
+/// A position that has not occurred before is not a repetition, and a short
+/// halfmove clock rules one out entirely.
+#[test]
+fn fresh_positions_are_not_repetitions() {
+    let cb = Chessboard::new_initial_board();
+    let mut history = History::new();
+    history.push(&cb);
+    assert!(!history.repeats(&cb), "halfmove clock 0 cannot be a repetition");
 }

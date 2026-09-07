@@ -5,7 +5,64 @@ use crate::{
     eval::evaluate,
     move_gen::{black_legal_moves, white_legal_moves},
     move_list::MoveList,
+    zobrist,
 };
+
+/// Half-moves without a capture or a pawn move after which the game is drawn.
+pub const FIFTY_MOVE_PLIES: u32 = 100;
+
+/// Zobrist keys of the positions on the path from the game's start to the node
+/// being searched.
+///
+/// Repetition is a property of the whole game, not of the current position, so
+/// the search cannot detect it from the board alone -- it needs the positions
+/// that came before. The UCI layer seeds this from `position ... moves` and the
+/// search pushes and pops as it descends.
+#[derive(Default, Clone)]
+pub struct History {
+    keys: Vec<u64>,
+}
+
+impl History {
+    pub fn new() -> Self {
+        History { keys: Vec::with_capacity(64) }
+    }
+
+    pub fn push(&mut self, cb: &Chessboard) {
+        self.keys.push(zobrist::hash(cb));
+    }
+
+    pub fn pop(&mut self) {
+        self.keys.pop();
+    }
+
+    /// Has this position occurred before?
+    ///
+    /// One earlier occurrence is enough to return a draw score. Requiring a
+    /// true threefold would let the search walk into a repetition believing it
+    /// was still winning, and every repetition inside the search is one the
+    /// side to move can choose to reach.
+    ///
+    /// Only positions since the last irreversible move can repeat, so the scan
+    /// is bounded by the halfmove clock rather than the length of the game.
+    pub fn repeats(&self, cb: &Chessboard) -> bool {
+        let reversible = cb.halfmove_clock as usize;
+        if reversible < 4 {
+            return false; // Too recent for a position to have come back.
+        }
+        let key = zobrist::hash(cb);
+        let window = reversible.min(self.keys.len());
+        // A position can only recur with the same side to move. The most recent
+        // entry is the position just before this one, so it has the *opposite*
+        // side to move: skip it, then take every second entry going back.
+        self.keys[self.keys.len() - window..]
+            .iter()
+            .rev()
+            .skip(1)
+            .step_by(2)
+            .any(|&seen| seen == key)
+    }
+}
 
 /// Set to ask an in-flight search to give up as soon as it can. The scores it
 /// returns after this point are meaningless, so whoever sets it must discard the
@@ -46,6 +103,7 @@ pub fn nega_max_alpha_beta_best_move(
     is_white_turn: bool,
     mut alpha: i32,
     beta: i32,
+    history: &mut History,
 ) -> (i32, Chessboard) {
     // Quiescence counts its own nodes, so leave the leaf to it rather than
     // counting this position twice.
@@ -74,6 +132,7 @@ pub fn nega_max_alpha_beta_best_move(
         return (terminal_score(cb, is_white_turn, depth), *cb);
     }
 
+
     // Iterate over moves.
     'legal_moves: while let Some(next_move) = legal_moves.next_move() {
         // Extract the new position from the move.
@@ -82,11 +141,25 @@ pub fn nega_max_alpha_beta_best_move(
         let safe_beta = safe_neg(beta);
         let safe_alpha = safe_neg(alpha);
 
-        // Recursively search the subtree.
-        let child_result = nega_max_alpha_beta_best_move(&pos, depth - 1, !is_white_turn, safe_beta, safe_alpha);
-
-        // Determine the score for this move.
-        let score = -child_result.0; // Negate the child's score.
+        // Score the position this move leads to. A move into a repetition or
+        // past the fifty-move limit is a draw however good the position looks,
+        // and both are cheaper to detect than to search. The mate test lives in
+        // the child, so mating on the hundredth half-move still wins.
+        history.push(cb);
+        let score = if history.repeats(&pos) || pos.halfmove_clock >= FIFTY_MOVE_PLIES {
+            DRAW
+        } else {
+            let child_result = nega_max_alpha_beta_best_move(
+                &pos,
+                depth - 1,
+                !is_white_turn,
+                safe_beta,
+                safe_alpha,
+                history,
+            );
+            -child_result.0 // Negate the child's score.
+        };
+        history.pop();
 
         // If this move is better, update the best score and best position.
         if score > best_score {
