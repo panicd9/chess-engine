@@ -13,8 +13,11 @@ pub enum Piece {
     None,
 }
 
+// repr(u8), not repr(usize): `piece as usize` works on any fieldless enum, but
+// repr(usize) makes each variant 8 bytes, which turns the 64-entry
+// `piece_square` array into 512 bytes rather than 64 -- copied on every move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(usize)]
+#[repr(u8)]
 pub enum ColoredPiece {
     WhitePawn = 0,
     BlackPawn = 1,

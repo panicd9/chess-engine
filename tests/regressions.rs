@@ -66,3 +66,13 @@ fn illegal_fens_are_rejected() {
         assert!(Chessboard::from_fen(fen).is_ok(), "{fen} should parse");
     }
 }
+
+/// `Chessboard` is Copy and is cloned at every search node, so its size is on
+/// the hot path. repr(usize) on ColoredPiece made piece_square 512 bytes.
+#[test]
+fn board_stays_small() {
+    let size = std::mem::size_of::<Chessboard>();
+    println!("size_of::<Chessboard>() = {size}");
+    assert!(size <= 256, "board grew to {size} bytes");
+    assert_eq!(std::mem::size_of::<chess_engine::piece::ColoredPiece>(), 1);
+}
