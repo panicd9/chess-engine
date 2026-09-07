@@ -76,3 +76,127 @@ fn board_stays_small() {
     assert!(size <= 256, "board grew to {size} bytes");
     assert_eq!(std::mem::size_of::<chess_engine::piece::ColoredPiece>(), 1);
 }
+
+// --- board-state invariants -------------------------------------------------
+//
+// `piece_square` is a redundant view of the twelve piece bitboards, and the
+// capture helpers trust it to decide which piece to remove. When the two drift,
+// the evaluation silently reads a piece that is not there and captures can
+// remove the wrong one. Two bugs of exactly that shape have been fixed here
+// (castling not clearing the rook's origin, and a capture-promotion writing the
+// destination before reading it), so the invariant is worth asserting directly.
+
+use chess_engine::piece::ColoredPiece;
+
+fn expected_piece_square(cb: &Chessboard) -> [ColoredPiece; 64] {
+    let mut squares = [ColoredPiece::Empty; 64];
+    for (bitboard, piece) in [
+        (cb.white_pawns, ColoredPiece::WhitePawn),
+        (cb.white_knights, ColoredPiece::WhiteKnight),
+        (cb.white_bishops, ColoredPiece::WhiteBishop),
+        (cb.white_rooks, ColoredPiece::WhiteRook),
+        (cb.white_queens, ColoredPiece::WhiteQueen),
+        (cb.white_king, ColoredPiece::WhiteKing),
+        (cb.black_pawns, ColoredPiece::BlackPawn),
+        (cb.black_knights, ColoredPiece::BlackKnight),
+        (cb.black_bishops, ColoredPiece::BlackBishop),
+        (cb.black_rooks, ColoredPiece::BlackRook),
+        (cb.black_queens, ColoredPiece::BlackQueen),
+        (cb.black_king, ColoredPiece::BlackKing),
+    ] {
+        let mut remaining = bitboard;
+        while remaining != 0 {
+            squares[remaining.trailing_zeros() as usize] = piece;
+            remaining &= remaining - 1;
+        }
+    }
+    squares
+}
+
+fn assert_consistent(cb: &Chessboard, context: &str) {
+    for (square, &want) in expected_piece_square(cb).iter().enumerate() {
+        assert_eq!(
+            cb.piece_square[square], want,
+            "piece_square[{square}] disagrees with the bitboards after {context}"
+        );
+    }
+    assert_eq!(
+        cb.get_white_occupancy() & cb.get_black_occupancy(),
+        0,
+        "a square is occupied by both colours after {context}"
+    );
+}
+
+fn walk(cb: &Chessboard, depth: u32, context: &str) {
+    assert_consistent(cb, context);
+    if depth == 0 {
+        return;
+    }
+    for m in legal_moves(cb) {
+        walk(&m.chessboard, depth - 1, context);
+    }
+}
+
+#[test]
+fn piece_square_stays_in_sync_with_bitboards() {
+    for (fen, depth) in [
+        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 4),
+        ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 3),
+        ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 4),
+        ("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 3),
+        ("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", 3),
+        ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", 3),
+    ] {
+        walk(&Chessboard::from_fen(fen).unwrap(), depth, fen);
+    }
+}
+
+/// Castling moves two pieces; the rook's home square must not be left occupied.
+#[test]
+fn castling_clears_the_rook_home_square() {
+    for (fen, king_to, rook_home) in [
+        ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", 6u32, 7usize),   // O-O,   h1
+        ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", 2, 0),           // O-O-O, a1
+        ("r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1", 62, 63),         // ..O-O, h8
+        ("r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1", 58, 56),         // ..O-O-O, a8
+    ] {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        let castled = legal_moves(&cb)
+            .into_iter()
+            .map(|m| m.chessboard)
+            .find(|c| (c.white_king | c.black_king) & (1u64 << king_to) != 0)
+            .expect("castling should be legal here");
+        assert_eq!(
+            castled.piece_square[rook_home],
+            ColoredPiece::Empty,
+            "square {rook_home} still occupied after castling in {fen}"
+        );
+        assert_consistent(&castled, "castling");
+    }
+}
+
+/// All four promotion pieces must be reachable on a capture; promoting to a
+/// bishop while capturing used to corrupt the board.
+#[test]
+fn capture_promotions_produce_all_four_pieces() {
+    let cb = Chessboard::from_fen("r1r5/1P6/8/8/8/8/8/4K2k w - - 0 1").unwrap();
+    let mut promoted = vec![];
+    for m in legal_moves(&cb) {
+        let c = m.chessboard;
+        assert_consistent(&c, "capture promotion");
+        // The pawn left b7; whatever it became is on a8 or c8.
+        for sq in [56usize, 58] {
+            if c.white_pawns & (1u64 << 49) == 0 && c.piece_square[sq] != cb.piece_square[sq] {
+                promoted.push(c.piece_square[sq]);
+            }
+        }
+    }
+    for wanted in [
+        ColoredPiece::WhiteQueen,
+        ColoredPiece::WhiteRook,
+        ColoredPiece::WhiteBishop,
+        ColoredPiece::WhiteKnight,
+    ] {
+        assert!(promoted.contains(&wanted), "no capture-promotion to {wanted:?}");
+    }
+}

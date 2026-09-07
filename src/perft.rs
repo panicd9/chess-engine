@@ -135,99 +135,60 @@ fn square_to_notation(square: usize) -> String {
 
 #[cfg(test)]
 mod perft_tests {
-    use std::time::Instant;
-
     use super::*;
-    use crate::{
-        chessboard::{Chessboard, Color},
-        utils::{ANTI_DIAGONAL_MASKS, DIAGONAL_MASKS},
-    };
+
+    /// Reference counts from the chessprogramming wiki. These are the standard
+    /// positions: each one exercises a different corner of move generation
+    /// (castling, en passant, promotions, capture-promotions, pins).
+    const POSITIONS: &[(&str, &str, &[u64])] = &[
+        (
+            "initial",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            &[20, 400, 8902, 197281, 4865609],
+        ),
+        (
+            "kiwipete",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            &[48, 2039, 97862, 4085603],
+        ),
+        (
+            "endgame",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+            &[14, 191, 2812, 43238, 674624],
+        ),
+        (
+            "promotions",
+            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+            &[6, 264, 9467, 422333],
+        ),
+        (
+            "position 5",
+            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+            &[44, 1486, 62379, 2103487],
+        ),
+        (
+            "position 6",
+            "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+            &[46, 2079, 89890, 3894594],
+        ),
+    ];
 
     #[test]
-    fn test_perft_initial_position() {
-        let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 1);
-        assert_eq!(nodes, 20); // Adjust the expected value based on your move generation logic
-    }
-
-    #[test]
-    fn test_perft_depth_2() {
-        let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 2);
-        assert_eq!(nodes, 400); // Adjust the expected value based on your move generation logic
-    }
-
-    #[test]
-    fn test_perft_depth_3() {
-        println!("TESTIRANJE::");
-        let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 3);
-        assert_eq!(nodes, 8902); // Adjust the expected value based on your move generation logic
-    }
-
-    #[test]
-    fn test_perft_depth_4() {
-        let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 4);
-        assert_eq!(nodes, 197281); // Adjust the expected value based on your move generation logic
-    }
-
-    #[test]
-    fn test_perft_depth_5() {
-        let cb = Chessboard::new_initial_board();
-        let start = Instant::now();
-        let nodes = perft(&cb, 5);
-        let duration = start.elapsed();
-        println!("Result: {}", nodes);
-        println!("Time taken: {:?}", duration);
-        assert_eq!(nodes, 4865609); // Adjust the expected value based on your move generation logic
-    }
-
-    #[test]
-    pub fn test_perft_depth_6() {
-        let cb = Chessboard::new_initial_board();
-        let nodes = perft(&cb, 6);
-        assert_eq!(nodes, 119060324); // Adjust the expected value based on your move generation logic
-    }
-
-    #[test]
-    fn test_perft_divide() {
-        let cb = Chessboard::new_initial_board();
-        perft_divide(&cb, 1); // Display moves at depth 1 for white's turn
-    }
-
-    #[test]
-    fn test_perft_depth_2_divide() {
-        let cb = Chessboard::new_initial_board();
-
-        for (i, d) in DIAGONAL_MASKS.iter().enumerate() {
-            println!("dia {}: ", i);
-            display_bitboard(*d);
+    fn perft_matches_reference_counts() {
+        for (name, fen, expected) in POSITIONS {
+            let cb = Chessboard::from_fen(fen).unwrap();
+            for (index, &want) in expected.iter().enumerate() {
+                let depth = index as u32 + 1;
+                assert_eq!(perft(&cb, depth), want, "{name} at depth {depth} ({fen})");
+            }
         }
-
-        for (i, d) in ANTI_DIAGONAL_MASKS.iter().enumerate() {
-            println!("anti {}: ", i);
-            display_bitboard(*d);
-        }
-        perft_divide(&cb, 2); // Display moves at depth 2 for white's turn
     }
 
-    // #[test]
-    // fn test_perft_depth_3_divide() {
-    //     let cb = Chessboard::new_initial_board();
-    //     perft_divide(&cb, 3, true); // Display moves at depth 3 for white's turn
-    // }
-
+    /// Slow. Run with `cargo test --release -- --ignored`.
     #[test]
-    fn test_perft_depth_4_divide() {
-        let mut cb = Chessboard::new_initial_board();
-
-        
-        cb.white_pawns = 0x1fe00;
-        cb.black_pawns = 0x7f008000000000;
-        cb.white_pawns = 0x80017e00;
-        cb.black_pawns = 0x3f00c000000000;
-        display_board(&cb);
-        perft_divide(&cb, 1); // Display moves at depth 4 for white's turn
+    #[ignore = "takes minutes"]
+    fn perft_deep() {
+        let cb = Chessboard::new_initial_board();
+        assert_eq!(perft(&cb, 6), 119_060_324);
     }
 }
