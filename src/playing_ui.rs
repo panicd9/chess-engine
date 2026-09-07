@@ -43,8 +43,24 @@ pub fn play() {
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        // read_line returns Ok(0) at end of input. Without this the loop spins
+        // forever printing "Invalid move format" once stdin closes.
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => {
+                println!("\nEnd of input, stopping.");
+                return;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                println!("\nCould not read input: {err}");
+                return;
+            }
+        }
         let input = input.trim();
+
+        if input == "quit" || input == "exit" {
+            return;
+        }
 
         if input.len() != 4 && input.len() != 5 {
             println!("Invalid move format. Please use the format 'e2e4'.");
