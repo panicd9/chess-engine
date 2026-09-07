@@ -37,3 +37,13 @@ fn still_finds_checkmate() {
     println!("mate search: {} score {score}", to_fen(&next));
     assert!(legal_moves(&next).is_empty() && next.is_black_king_under_attack(), "should be mate");
 }
+
+/// Quiescence is entered at depth 0 and recursed with `depth - 1` on a u32,
+/// which panicked in any build with overflow checks on (i.e. every debug build).
+#[test]
+fn quiescence_depth_does_not_underflow() {
+    let cb = Chessboard::from_fen(
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10").unwrap();
+    let (score, _) = nega_max_alpha_beta_best_move(&cb, 3, true, A, B);
+    println!("search completed, score {score}");
+}

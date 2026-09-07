@@ -186,8 +186,10 @@ pub fn quiescence_search_best_move(
         // Recurse: the returned board here is from the child's perspective.
         // Since we want the immediate move (next_move.chessboard) at this level,
         // we ignore the child's board state.
+        // Quiescence is entered at depth 0 and is bounded by captures running
+        // out, not by this counter, so it must saturate rather than wrap.
         let child_result =
-            quiescence_search_best_move(&pos, !is_white_turn, depth - 1, safe_beta, safe_alpha);
+            quiescence_search_best_move(&pos, !is_white_turn, depth.saturating_sub(1), safe_beta, safe_alpha);
 
         // Invert the child's score (negamax style).
         let score = -child_result.0;
