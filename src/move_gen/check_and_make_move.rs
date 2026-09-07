@@ -125,10 +125,12 @@ pub fn check_and_make_white_pawn_move(
             remaining_attacks &= remaining_attacks - 1;
         }
 
-        // En passant capture
+        // En passant capture. Like the branches above this must check that the
+        // capture is the move that was actually asked for, or it becomes the
+        // answer to every request that reached this far.
         if en_passant_square != 0 {
             let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[from];
-            if en_passant_mask != 0 {
+            if en_passant_mask == to_bitboard && en_passant_mask != 0 {
                 let new_position =
                     cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
                 if !new_position.chessboard.is_white_king_under_attack() {
@@ -221,10 +223,10 @@ pub fn check_and_make_black_pawn_move(
             remaining_attacks &= remaining_attacks - 1;
         }
 
-        // En passant capture
+        // En passant capture. See the white side.
         if en_passant_square != 0 {
             let en_passant_mask = en_passant_square & BLACK_PAWN_ATTACKS[from];
-            if en_passant_mask != 0 {
+            if en_passant_mask == to_bitboard && en_passant_mask != 0 {
                 let new_position =
                     cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
                 if !new_position.chessboard.is_black_king_under_attack() {

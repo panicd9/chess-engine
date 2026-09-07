@@ -249,3 +249,24 @@ fn describe_and_parse_round_trip() {
     println!("round-tripped {checked} moves");
     assert!(checked > 150, "expected a broad sample of moves, only saw {checked}");
 }
+
+/// `make_move` must play the move it was asked for, or reject it. Each branch
+/// of the pawn validator has to confirm the destination matches: without that,
+/// whichever branch comes last answers every request that reaches it.
+#[test]
+fn make_move_rejects_moves_it_cannot_play() {
+    // Blocked push while en passant happens to be available. e5e6 is illegal
+    // (a knight is on e6); it must not silently become exd6 e.p.
+    let cb = Chessboard::from_fen(
+        "rnbqkbnr/ppp1pppp/4n3/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3").unwrap();
+    assert!(cb.make_move(36, 44, None).is_err(), "blocked e5e6 must be rejected");
+    // The real en passant capture on the same position is still legal.
+    let ep = cb.make_move(36, 43, None).expect("e5d6 e.p. should be legal");
+    assert_eq!(ep.piece_square[35], ColoredPiece::Empty, "captured pawn should be gone");
+
+    // Same shape for black: d4d3 is blocked, en passant is available on e3.
+    let cb = Chessboard::from_fen(
+        "rnbqkbnr/pppp1ppp/8/8/3pP3/3N4/PPPP1PPP/R1BQKBNR b KQkq e3 0 3").unwrap();
+    assert!(cb.make_move(27, 19, None).is_err(), "blocked d4d3 must be rejected");
+    assert!(cb.make_move(27, 20, None).is_ok(), "d4e3 e.p. should be legal");
+}
