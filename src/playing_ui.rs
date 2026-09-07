@@ -4,8 +4,7 @@ use crate::{
     iterative_deepening::{
         iterative_deepening_best_5_lines_with_interupt_support, start_key_listener,
     },
-    perft::{compare_boards, format_move},
-    piece::PromotionPiece,
+    notation::{describe_move, parse_move},
     search::{nega_max_alpha_beta_best_line, nega_max_alpha_beta_best_move},
 };
 use crossterm::style::{Attribute, Color as TextColor, ResetColor, SetBackgroundColor, SetForegroundColor};
@@ -13,14 +12,6 @@ use std::{
     io::{self, Write},
     sync::{atomic::AtomicBool, Arc},
 };
-
-#[derive(Debug)]
-pub enum ParseError {
-    InvalidSquareFormat,
-    InvalidFile,
-    InvalidRank,
-    InvalidPromotionPiece,
-}
 
 pub fn play() {
     const MAX_DEPTH: u32 = 7;
@@ -62,40 +53,15 @@ pub fn play() {
             return;
         }
 
-        if input.len() != 4 && input.len() != 5 {
-            println!("Invalid move format. Please use the format 'e2e4'.");
-            continue;
-        }
-
-        let from = parse_square(&input[0..2]);
-        let to = parse_square(&input[2..4]);
-        let promotion_piece = if input.len() == 5 {
-            match input.chars().nth(4) {
-                Some(ch) => match parse_promotion_piece(ch) {
-                    Ok(piece) => Some(piece),
-                    Err(err) => {
-                        println!("Error parsing promotion piece: {:?}", err);
-                        None
-                    }
-                },
-                None => {
-                    println!("Error: Promotion piece character not found.");
-                    None
-                }
+        let parsed = match parse_move(input) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                println!("{err}");
+                continue;
             }
-        } else {
-            None
         };
 
-        if from.is_err() || to.is_err() {
-            println!("Invalid move. Please try again.");
-            continue;
-        }
-
-        let from = from.unwrap();
-        let to = to.unwrap();
-
-        match cb.make_move(from, to, promotion_piece) {
+        match cb.make_move(parsed.from, parsed.to, parsed.promotion) {
             Ok(new_cb) => {
                 println!("You played {}!", input);
                 display_board(&new_cb);
@@ -143,11 +109,9 @@ pub fn play() {
 
             for (i, window) in best_line.1.windows(2).enumerate() {
                 let (prev, next) = (&window[0], &window[1]);
-                let compared = compare_boards(prev, next);
+                let compared = describe_move(prev, next);
 
-                if let Some((from, to)) = compared {
-                    let formatted_move = format_move(from, to);
-
+                if let Some(formatted_move) = compared {
                     if i == 0 {
                         // Highlight the first move with bold, background color, and green text
                         print!(
@@ -184,10 +148,9 @@ pub fn play() {
             println!("Line {} ({}): ", i + 2, line.0);
             for window in line.1.windows(2) {
                 let (prev, next) = (&window[0], &window[1]); // Extract the consecutive elements
-                let compared = compare_boards(prev, next);
+                let compared = describe_move(prev, next);
 
-                if let Some((from, to)) = compared {
-                    let formatted_move = format_move(from, to);
+                if let Some(formatted_move) = compared {
                     print!(" {}", formatted_move);
                 } else {
                     print!(" UNKNOWN");
@@ -268,38 +231,6 @@ fn engine_move_best_5_lines(cb: Chessboard, depth: u32) -> Vec<(f32, Vec<Chessbo
         .collect();
 
     best_5_lines_with_scores
-}
-
-//////////////////////////// PARSING ////////////////////////////
-fn parse_square(square: &str) -> Result<usize, ParseError> {
-    if square.len() != 2 {
-        return Err(ParseError::InvalidSquareFormat);
-    }
-
-    let file = square.chars().nth(0).unwrap().to_ascii_lowercase();
-    let rank = square.chars().nth(1).unwrap();
-
-    let file_index = match file {
-        'a'..='h' => file as usize - 'a' as usize,
-        _ => return Err(ParseError::InvalidFile),
-    };
-
-    let rank_index = match rank {
-        '1'..='8' => rank as usize - '1' as usize,
-        _ => return Err(ParseError::InvalidRank),
-    };
-
-    Ok(rank_index * 8 + file_index)
-}
-
-fn parse_promotion_piece(piece: char) -> Result<PromotionPiece, ParseError> {
-    match piece {
-        'q' | 'Q' => Ok(PromotionPiece::Queen),
-        'r' | 'R' => Ok(PromotionPiece::Rook),
-        'b' | 'B' => Ok(PromotionPiece::Bishop),
-        'n' | 'N' => Ok(PromotionPiece::Knight),
-        _ => Err(ParseError::InvalidPromotionPiece),
-    }
 }
 
 fn engine_move(cb: Chessboard, depth: u32) -> (f32, Chessboard) {

@@ -96,30 +96,22 @@ fn reports_forced_mate() {
     );
 }
 
+/// An unfinished iteration has to be abandoned when the time runs out, so both
+/// a fixed `movetime` and a clock have to come back well inside their budget.
 #[test]
-fn respects_movetime() {
+fn respects_time_limits() {
     let mut engine = Engine::start();
     engine.handshake();
-    let started = Instant::now();
-    let (mv, _) = engine.bestmove("position startpos", "go movetime 400");
-    let elapsed = started.elapsed();
-    assert_eq!(mv.len(), 4);
-    assert!(
-        elapsed.as_millis() < 2500,
-        "movetime 400 took {elapsed:?}; the search is not being interrupted"
-    );
-}
-
-#[test]
-fn respects_the_clock() {
-    let mut engine = Engine::start();
-    engine.handshake();
-    let started = Instant::now();
-    // With 2s on the clock it must not think for anything like 2s.
-    let (mv, _) = engine.bestmove("position startpos", "go wtime 2000 btime 2000");
-    let elapsed = started.elapsed();
-    assert_eq!(mv.len(), 4);
-    assert!(elapsed.as_millis() < 1000, "used {elapsed:?} of a 2s clock");
+    for (go, limit_ms) in [("go movetime 400", 2500), ("go wtime 2000 btime 2000", 1000)] {
+        let started = Instant::now();
+        let (mv, _) = engine.bestmove("position startpos", go);
+        let elapsed = started.elapsed();
+        assert_eq!(mv.len(), 4, "`{go}` did not return a move");
+        assert!(
+            elapsed.as_millis() < limit_ms,
+            "`{go}` took {elapsed:?}; the search is not being interrupted"
+        );
+    }
 }
 
 #[test]

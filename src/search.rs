@@ -2,9 +2,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::{
     chessboard::Chessboard,
-    display::display_board_string,
     eval::evaluate,
-    move_gen::{black_legal_moves, legal_moves, white_legal_moves},
+    move_gen::{black_legal_moves, white_legal_moves},
     move_list::MoveList,
 };
 
@@ -14,7 +13,7 @@ use crate::{
 pub static STOP: AtomicBool = AtomicBool::new(false);
 
 /// Nodes visited since [`reset_nodes`]. Reported as `nodes`/`nps` over UCI.
-pub static NODES: AtomicU64 = AtomicU64::new(0);
+static NODES: AtomicU64 = AtomicU64::new(0);
 
 pub fn reset_nodes() {
     NODES.store(0, Ordering::Relaxed);
@@ -26,8 +25,11 @@ pub fn nodes_searched() -> u64 {
 
 /// Count this node and report whether the search has been asked to stop.
 ///
-/// The stop flag is only polled every 2048 nodes: an atomic load per node is
-/// cheap but not free, and 2048 nodes is well under a millisecond.
+/// The stop flag is only read every 2048 nodes, which is well under a
+/// millisecond -- often enough to honour a time limit, rare enough not to
+/// matter. The counter itself is a read-modify-write on a shared line, so if
+/// the search ever runs on more than one thread this wants to become a
+/// per-thread count published at the same 2048-node boundary.
 #[inline]
 fn count_node_and_should_stop() -> bool {
     let seen = NODES.fetch_add(1, Ordering::Relaxed);
@@ -41,17 +43,15 @@ pub fn nega_max_alpha_beta_best_move(
     mut alpha: i32,
     beta: i32,
 ) -> (i32, Chessboard) {
+    // Quiescence counts its own nodes, so leave the leaf to it rather than
+    // counting this position twice.
+    if depth == 0 {
+        return quiescence_search_best_move(cb, is_white_turn, depth, alpha, beta);
+    }
+
     if count_node_and_should_stop() {
         // Unwind immediately. The caller discards this iteration's result.
         return (0, *cb);
-    }
-
-    // Base case: evaluate the board when depth is 0.
-    if depth == 0 {
-        // Directly return the evaluation and a clone of the board.
-        return quiescence_search_best_move(cb, is_white_turn, depth, alpha, beta);
-        // let eval = if is_white_turn { evaluate(cb) } else { -evaluate(cb) };
-        // return (eval, cb.clone());
     }
 
     // We'll track the best score and best resulting position.
@@ -110,9 +110,6 @@ pub fn nega_max_alpha_beta_best_line(
 ) -> Vec<(i32, Vec<Chessboard>)> {
     // Base case: Evaluate and return a single-line variation.
     if depth == 0 {
-        let score: i32 = evaluate(cb);
-        // let final_score = if is_white_turn { score } else { -score };
-        // return vec![(final_score, vec![cb.clone()])]; // No negation here
         return quiescence_search_best_line(cb, is_white_turn, alpha, beta);
     }
 
@@ -349,12 +346,34 @@ pub fn terminal_score(cb: &Chessboard, is_white_turn: bool, depth: u32) -> i32 {
         return DRAW; // Stalemate.
     }
 
-    const OVERFLOW_PROTECTOR: i32 = 1000;
-    i32::MIN + (OVERFLOW_PROTECTOR - depth as i32)
+    i32::MIN + (MATE_BOUND - depth as i32)
 }
 
 /// Score of a drawn position, from either side's point of view.
 pub const DRAW: i32 = 0;
+
+/// Mate scores are kept this far from the ends of the range so that negating
+/// one, which negamax does at every node, cannot overflow.
+const MATE_BOUND: i32 = 1000;
+
+/// Plies to mate encoded in `score`, or `None` if it is an ordinary score.
+///
+/// This is the inverse of the mate score [`terminal_score`] produces, and lives
+/// beside it so the two cannot drift apart. `depth` is the depth the score came
+/// back from, which is what turns the remaining depth stored in the score into
+/// a distance from the root.
+pub fn mate_in_plies(score: i32, depth: u32) -> Option<u32> {
+    // A mate score is `i32::MIN + (MATE_BOUND - depth_remaining)` for being
+    // mated, and that value negated for delivering mate.
+    let depth_remaining = if score > i32::MAX - 2 * MATE_BOUND {
+        score - (i32::MAX - (MATE_BOUND - 1))
+    } else if score < i32::MIN + 2 * MATE_BOUND {
+        (i32::MIN + MATE_BOUND) - score
+    } else {
+        return None;
+    };
+    Some(depth.saturating_sub(depth_remaining.max(0) as u32))
+}
 
 fn safe_neg(value: i32) -> i32 {
     if value == i32::MIN {
@@ -362,105 +381,4 @@ fn safe_neg(value: i32) -> i32 {
     } else {
         -value
     }
-}
-
-// pub fn nega_max_alpha_beta_best_line(
-//     cb: &Chessboard,
-//     depth: u32,
-//     is_white_turn: bool,
-//     alpha: i64,
-//     beta: i64,
-// ) -> (i64, Vec<Chessboard>) {
-//     if depth == 0 {
-//         let score = evaluate(cb); // Evaluate the position
-//         return (
-//             if is_white_turn { score } else { -score },
-//             vec![cb.clone()], // Return the current position as the "line"
-//         );
-//     }
-
-//     let legal_positions = if is_white_turn {
-//         white_legal_moves(cb)
-//     } else {
-//         black_legal_moves(cb)
-//     };
-
-//     let mut max: i64 = i64::MIN;
-//     let mut best_line: Vec<Chessboard> = Vec::new(); // This will hold the best sequence of moves
-//     let mut alpha = alpha;
-//     let mut beta = beta;
-
-//     for pos in legal_positions {
-//         let (child_score, child_line) = nega_max_alpha_beta_best_line(&pos, depth - 1, !is_white_turn, alpha, beta);
-
-//         // Handle potential negation overflow
-//         let score = if child_score == i64::MIN {
-//             i64::MAX // Avoid overflow
-//         } else {
-//             -child_score // Negate normally
-//         };
-
-//         if score > max {
-//             max = score;
-//             best_line = vec![cb.clone()]; // Start the best line with the current position
-//             best_line.extend(child_line); // Append the child's best line
-//         }
-
-//         // Alpha-beta pruning
-//         if max >= beta {
-//             break; // Beta cut-off
-//         }
-
-//         alpha = alpha.max(max);
-//     }
-
-//     return (max, best_line);
-// }
-
-// pub fn nega_max(cb: &Chessboard, depth: u32, is_white_turn: bool) -> i64 {
-//     if depth == 0 {
-//         return evaluate(cb);
-//     }
-
-//     let legal_positions = if is_white_turn {
-//         white_legal_moves(cb)
-//     } else {
-//         black_legal_moves(cb)
-//     };
-//     let mut max: i64 = i64::MIN;
-
-//     for pos in legal_positions {
-//         let child_score = nega_max(&pos, depth - 1, !is_white_turn);
-
-//         // Check if negating would overflow (i64::MIN can't be negated)
-//         let score = if child_score == i64::MIN {
-//             i64::MAX // Return the maximum possible value to handle the overflow
-//         } else {
-//             -child_score // Otherwise, negate the score normally
-//         };
-
-//         if score > max {
-//             max = score;
-//         }
-//     }
-
-//     return max;
-// }
-
-mod test {
-    use std::time::Instant;
-
-    use crate::chessboard::Chessboard;
-
-    // #[test]
-    // fn test_negamax() {
-    //     let cb = Chessboard::new_initial_board();
-
-    //     let start = Instant::now();
-    //     let result = nega_max(&cb, 5, true);
-    //     let duration = start.elapsed();
-
-    //     println!("Result: {}", result);
-    //     println!("Time taken: {:?}", duration);
-    // }
 }

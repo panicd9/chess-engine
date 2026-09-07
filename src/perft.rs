@@ -1,5 +1,5 @@
 use crate::chessboard::{Chessboard, Color};
-use crate::display::{self, display_bitboard, display_board};
+use crate::notation::describe_move;
 use crate::move_gen::{black_legal_moves, white_legal_moves};
 
 pub fn perft(cb: &Chessboard, depth: u32) -> u64 {
@@ -23,57 +23,6 @@ pub fn perft(cb: &Chessboard, depth: u32) -> u64 {
     nodes
 }
 
-/// Compares two Chessboards and returns a list of moves as a tuple (from_square, to_square).
-pub fn compare_boards(before: &Chessboard, after: &Chessboard) -> Option<(usize, usize)> {
-    // Compare bitboards for each piece type to identify the difference
-    let piece_bitboards = [
-        ("P", before.white_pawns, after.white_pawns),
-        ("p", before.black_pawns, after.black_pawns),
-        ("N", before.white_knights, after.white_knights),
-        ("n", before.black_knights, after.black_knights),
-        ("B", before.white_bishops, after.white_bishops),
-        ("b", before.black_bishops, after.black_bishops),
-        ("R", before.white_rooks, after.white_rooks),
-        ("r", before.black_rooks, after.black_rooks),
-        ("Q", before.white_queens, after.white_queens),
-        ("q", before.black_queens, after.black_queens),
-        ("K", before.white_king, after.white_king),
-        ("k", before.black_king, after.black_king),
-    ];
-
-    // Iterate over all piece types
-    for (_, before_bitboard, after_bitboard) in piece_bitboards.iter() {
-        // Find pieces that have moved using XOR
-        let moved = before_bitboard ^ after_bitboard;
-
-        // Iterate over all squares (0 to 63) to find moved pieces
-        for i in 0..64 {
-            if (moved >> i) & 1 == 1 {
-                // Check if there was a piece on square i before
-                if (before_bitboard >> i) & 1 == 1 {
-                    // A piece was on square i before, now we need to find the destination square
-                    for j in 0..64 {
-                        if (after_bitboard >> j) & 1 == 1
-                            && i != j
-                            && (before_bitboard >> j) & 1 == 0
-                        {
-                            // A piece moved from square i to square j
-
-                            // display_board(before);
-                            // display_board(after);
-                            // println!("i: {}, j: {}", i, j);
-                            return Some((i, j)); // Return the move
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // If no move is found (shouldn't happen if only one move is played)
-    None
-}
-
 /// Perft divide function that prints the move and the corresponding perft count for each move.
 pub fn perft_divide(cb: &Chessboard, depth: u32) {
     if depth == 0 {
@@ -95,11 +44,8 @@ pub fn perft_divide(cb: &Chessboard, depth: u32) {
         let nodes = perft(&pos.chessboard, depth - 1);
         // println!("\n Table:");
         // display_board(&pos);
-        let compare = compare_boards(cb, &pos.chessboard).unwrap();
-        // println!("COMPARE: {:?}", compare);
-        // display_board(&pos);
-        let formatted_move = format_move(compare.0, compare.1);
-        println!("{}: {}", formatted_move, nodes);
+        let played = describe_move(cb, &pos.chessboard).unwrap_or_else(|| "????".to_string());
+        println!("{played}: {nodes}");
         total_nodes += nodes;
         move_counts.push((pos, nodes));
     }
@@ -117,20 +63,6 @@ pub fn perft_divide(cb: &Chessboard, depth: u32) {
     // }
 
     // println!("Nodes searched: {}", total_nodes);
-}
-
-pub fn format_move(from: usize, to: usize) -> String {
-    // Convert square index to chess notation (e.g., "e2e4")
-    let start_square = square_to_notation(from);
-    let end_square = square_to_notation(to);
-    format!("{}{}", start_square, end_square)
-}
-
-fn square_to_notation(square: usize) -> String {
-    let rank = square / 8 + 1;
-    let file = (square % 8) as u8;
-    let file_char = (b'a' + file) as char;
-    format!("{}{}", file_char, rank)
 }
 
 #[cfg(test)]

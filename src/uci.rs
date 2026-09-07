@@ -6,9 +6,8 @@
 //! [`search::STOP`] and let the worker unwind.
 
 use std::io::{self, BufRead, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -66,21 +65,8 @@ impl Limits {
     }
 }
 
-/// The position the GUI has set up, shared with the search thread.
-#[derive(Clone)]
-struct Game {
-    board: Chessboard,
-}
-
-impl Default for Game {
-    fn default() -> Self {
-        Game { board: Chessboard::new_initial_board() }
-    }
-}
-
 pub fn run() -> io::Result<()> {
-    let game = Arc::new(Mutex::new(Game::default()));
-    let searching = Arc::new(AtomicBool::new(false));
+    let mut board = Chessboard::new_initial_board();
     let mut worker: Option<thread::JoinHandle<()>> = None;
 
     let stdin = io::stdin();
@@ -97,25 +83,24 @@ pub fn run() -> io::Result<()> {
             }
             "isready" => println!("readyok"),
             "ucinewgame" => {
-                stop_search(&searching, &mut worker);
-                *game.lock().unwrap() = Game::default();
+                stop_search(&mut worker);
+                board = Chessboard::new_initial_board();
             }
             "position" => {
-                stop_search(&searching, &mut worker);
+                stop_search(&mut worker);
                 match parse_position(&line) {
-                    Ok(board) => game.lock().unwrap().board = board,
+                    Ok(parsed) => board = parsed,
                     Err(err) => eprintln!("info string bad position: {err}"),
                 }
             }
             "go" => {
-                stop_search(&searching, &mut worker);
+                stop_search(&mut worker);
                 let limits = parse_go(&line);
-                let board = game.lock().unwrap().board;
-                worker = Some(spawn_search(board, limits, Arc::clone(&searching)));
+                worker = Some(thread::spawn(move || search_and_report(board, limits)));
             }
-            "stop" => stop_search(&searching, &mut worker),
+            "stop" => stop_search(&mut worker),
             "quit" => {
-                stop_search(&searching, &mut worker);
+                stop_search(&mut worker);
                 return Ok(());
             }
             // Unknown commands are ignored, as the protocol requires.
@@ -124,29 +109,18 @@ pub fn run() -> io::Result<()> {
         io::stdout().flush()?;
     }
 
-    stop_search(&searching, &mut worker);
+    stop_search(&mut worker);
     Ok(())
 }
 
-fn stop_search(searching: &Arc<AtomicBool>, worker: &mut Option<thread::JoinHandle<()>>) {
+/// Ask any running search to finish, wait for it, and clear the flag ready for
+/// the next one.
+fn stop_search(worker: &mut Option<thread::JoinHandle<()>>) {
     search::STOP.store(true, Ordering::Relaxed);
     if let Some(handle) = worker.take() {
         let _ = handle.join();
     }
-    searching.store(false, Ordering::Relaxed);
     search::STOP.store(false, Ordering::Relaxed);
-}
-
-fn spawn_search(
-    board: Chessboard,
-    limits: Limits,
-    searching: Arc<AtomicBool>,
-) -> thread::JoinHandle<()> {
-    searching.store(true, Ordering::Relaxed);
-    thread::spawn(move || {
-        search_and_report(board, limits);
-        searching.store(false, Ordering::Relaxed);
-    })
 }
 
 /// Iterative deepening. Each completed depth replaces the move to play; a depth
@@ -161,18 +135,10 @@ fn search_and_report(board: Chessboard, limits: Limits) {
     // when the search finishes on its own, so it never outlives the search.
     let (done_tx, done_rx) = mpsc::channel::<()>();
     let watchdog = deadline.map(|deadline| {
-        thread::spawn(move || loop {
-            let now = Instant::now();
-            if now >= deadline {
+        thread::spawn(move || {
+            let wait = deadline.saturating_duration_since(Instant::now());
+            if done_rx.recv_timeout(wait) == Err(RecvTimeoutError::Timeout) {
                 search::STOP.store(true, Ordering::Relaxed);
-                return;
-            }
-            match done_rx.recv_timeout(deadline - now) {
-                Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
-                Err(RecvTimeoutError::Timeout) => {
-                    search::STOP.store(true, Ordering::Relaxed);
-                    return;
-                }
             }
         })
     });
@@ -181,8 +147,7 @@ fn search_and_report(board: Chessboard, limits: Limits) {
     let max_depth = limits.depth.unwrap_or(MAX_DEPTH);
     search::reset_nodes();
 
-    // Fall back on any legal move so we always answer with something legal.
-    let mut best: Option<Chessboard> = legal_moves(&board).first().map(|m| m.chessboard);
+    let mut best: Option<Chessboard> = None;
 
     for depth in 1..=max_depth {
         let (score, position) =
@@ -196,7 +161,7 @@ fn search_and_report(board: Chessboard, limits: Limits) {
         report_info(&board, &position, score, depth, started);
 
         // A forced mate is as good as it gets; searching deeper cannot improve it.
-        if mate_distance_plies(score, depth).is_some() {
+        if search::mate_in_plies(score, depth).is_some() {
             break;
         }
 
@@ -214,6 +179,12 @@ fn search_and_report(board: Chessboard, limits: Limits) {
     let _ = done_tx.send(());
     if let Some(watchdog) = watchdog {
         let _ = watchdog.join();
+    }
+
+    // Stopped before even depth 1 finished: answer with any legal move rather
+    // than nothing.
+    if best.is_none() {
+        best = legal_moves(&board).first().map(|m| m.chessboard);
     }
 
     match best.and_then(|position| describe_move(&board, &position)) {
@@ -237,7 +208,7 @@ fn report_info(
     let nodes = search::nodes_searched();
     let nps = nodes * 1000 / millis;
 
-    let score_text = match mate_distance_plies(score, depth) {
+    let score_text = match search::mate_in_plies(score, depth) {
         // UCI counts mate in moves, and signs it from the side to move.
         Some(plies) => format!("mate {}", (plies + 1) / 2),
         None => format!("cp {score}"),
@@ -250,27 +221,8 @@ fn report_info(
     let _ = io::stdout().flush();
 }
 
-/// Plies to mate encoded in `score`, if it is a mate score.
-///
-/// `terminal_score` returns `i32::MIN + (1000 - depth_remaining)` for being
-/// mated, so a mate found for the side to move comes back negated as
-/// `i32::MAX - 999 + depth_remaining`, and the plies used to reach it are
-/// `depth - depth_remaining`.
-fn mate_distance_plies(score: i32, depth: u32) -> Option<u32> {
-    const WINDOW: i32 = 2000;
-    if score > i32::MAX - WINDOW {
-        let depth_remaining = score - (i32::MAX - 999);
-        return Some(depth.saturating_sub(depth_remaining.max(0) as u32));
-    }
-    if score < i32::MIN + WINDOW {
-        let depth_remaining = (i32::MIN + 1000) - score;
-        return Some(depth.saturating_sub(depth_remaining.max(0) as u32));
-    }
-    None
-}
-
 fn parse_position(line: &str) -> Result<Chessboard, String> {
-    let rest = line.strip_prefix("position").ok_or("not a position command")?.trim();
+    let rest = line.trim_start().trim_start_matches("position").trim();
 
     let (mut board, after_position) = if let Some(rest) = rest.strip_prefix("startpos") {
         (Chessboard::new_initial_board(), rest)

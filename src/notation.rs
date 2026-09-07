@@ -112,8 +112,8 @@ pub fn describe_move(before: &Chessboard, after: &Chessboard) -> Option<String> 
             Color::Black => (before.black_king, after.black_king),
         };
         return Some(format_move(
-            (vacated & king_before).trailing_zeros() as SquareIndex,
-            (filled & king_after).trailing_zeros() as SquareIndex,
+            king_before.trailing_zeros() as SquareIndex,
+            king_after.trailing_zeros() as SquareIndex,
         ));
     }
 
