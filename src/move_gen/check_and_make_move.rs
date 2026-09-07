@@ -26,6 +26,23 @@ use super::{
     move_gen_rook::single_rook_attacks,
 };
 
+use crate::move_list::Move;
+
+/// Pick one of the four promotion positions, which are always ordered queen,
+/// knight, bishop, rook.
+fn pick_promotion(
+    promotions: &[Move; 4],
+    promotion_piece: Option<PromotionPiece>,
+) -> Result<Chessboard, &'static str> {
+    let index = match promotion_piece.ok_or("Promotion piece not provided")? {
+        PromotionPiece::Queen => 0,
+        PromotionPiece::Knight => 1,
+        PromotionPiece::Bishop => 2,
+        PromotionPiece::Rook => 3,
+    };
+    Ok(promotions[index].chessboard)
+}
+
 pub fn check_and_make_white_pawn_move(
     cb: &Chessboard,
     from: SquareIndex,
@@ -69,19 +86,15 @@ pub fn check_and_make_white_pawn_move(
                         }
                     }
                 }
-                // Promotion
-            } else {
-                // Queen, knight, bishop, rook
-                let new_promotion_positions =
-                    cb.make_all_white_pawn_promotion_moves(single_pawn, forward);
-                match promotion_piece {
-                    Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
-                    },
-                    None => return Err("Promotion piece not provided"),
+                // Promotion. The `forward == to_bitboard` guard matters: without
+                // it a pawn that can push to promote returns that push for ANY
+                // requested destination, so a capture-promotion silently became
+                // a straight promotion onto the wrong square.
+            } else if forward == to_bitboard {
+                let promotions = cb.make_all_white_pawn_promotion_moves(single_pawn, forward);
+                let chosen = pick_promotion(&promotions, promotion_piece)?;
+                if !chosen.is_white_king_under_attack() {
+                    return Ok(chosen);
                 }
             }
         }
@@ -102,16 +115,11 @@ pub fn check_and_make_white_pawn_move(
                     return Ok(new_position.chessboard);
                 }
             } else {
-                let new_promotion_positions =
+                let promotions =
                     cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack);
-                match promotion_piece {
-                    Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
-                    },
-                    None => return Err("Promotion piece not provided"),
+                let chosen = pick_promotion(&promotions, promotion_piece)?;
+                if !chosen.is_white_king_under_attack() {
+                    return Ok(chosen);
                 }
             }
             remaining_attacks &= remaining_attacks - 1;
@@ -176,19 +184,13 @@ pub fn check_and_make_black_pawn_move(
                         }
                     }
                 }
-                // Promotion
-            } else {
-                // Queen, knight, bishop, rook
-                let new_promotion_positions =
-                    cb.make_all_black_pawn_promotion_moves(single_pawn, forward);
-                match promotion_piece {
-                    Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
-                    },
-                    None => return Err("Promotion piece not provided"),
+                // Promotion. See the white side for why `forward == to_bitboard`
+                // is required here.
+            } else if forward == to_bitboard {
+                let promotions = cb.make_all_black_pawn_promotion_moves(single_pawn, forward);
+                let chosen = pick_promotion(&promotions, promotion_piece)?;
+                if !chosen.is_black_king_under_attack() {
+                    return Ok(chosen);
                 }
             }
         }
@@ -209,16 +211,11 @@ pub fn check_and_make_black_pawn_move(
                     return Ok(new_position.chessboard);
                 }
             } else {
-                let new_promotion_positions =
+                let promotions =
                     cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack);
-                match promotion_piece {
-                    Some(piece) => match piece {
-                        PromotionPiece::Queen => return Ok(new_promotion_positions[0].chessboard),
-                        PromotionPiece::Knight => return Ok(new_promotion_positions[1].chessboard),
-                        PromotionPiece::Bishop => return Ok(new_promotion_positions[2].chessboard),
-                        PromotionPiece::Rook => return Ok(new_promotion_positions[3].chessboard),
-                    },
-                    None => return Err("Promotion piece not provided"),
+                let chosen = pick_promotion(&promotions, promotion_piece)?;
+                if !chosen.is_black_king_under_attack() {
+                    return Ok(chosen);
                 }
             }
             remaining_attacks &= remaining_attacks - 1;

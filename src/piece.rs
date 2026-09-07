@@ -70,6 +70,7 @@ impl ColoredPiece {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromotionPiece {
     Queen,
     Knight,
