@@ -148,3 +148,25 @@ fn go_infinite_stops_on_command() {
         started.elapsed()
     );
 }
+
+/// The abort has to unwind the tree, not trickle through it. When the stop flag
+/// was only read on every 2048th node the other nodes carried on searching, and
+/// a short budget overran by ~100ms -- enough to lose on time in a fast game.
+#[test]
+fn short_budgets_do_not_overrun() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    for budget in [60u128, 100, 200] {
+        let started = Instant::now();
+        let (mv, _) = engine.bestmove(
+            "position startpos moves e2e4 e7e5 g1f3 b8c6 f1b5",
+            &format!("go movetime {budget}"),
+        );
+        let elapsed = started.elapsed().as_millis();
+        assert_eq!(mv.len(), 4);
+        assert!(
+            elapsed < budget + 120,
+            "movetime {budget} took {elapsed}ms"
+        );
+    }
+}

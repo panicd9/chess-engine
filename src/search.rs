@@ -25,15 +25,19 @@ pub fn nodes_searched() -> u64 {
 
 /// Count this node and report whether the search has been asked to stop.
 ///
-/// The stop flag is only read every 2048 nodes, which is well under a
-/// millisecond -- often enough to honour a time limit, rare enough not to
-/// matter. The counter itself is a read-modify-write on a shared line, so if
-/// the search ever runs on more than one thread this wants to become a
-/// per-thread count published at the same 2048-node boundary.
+/// Every node reads the flag. Sampling it (say, every 2048th node) would only
+/// gate the *check*, not the work: the other nodes would carry on generating
+/// moves and recursing, so an abort would trickle through the tree instead of
+/// unwinding it, and a time limit would overshoot by ~100ms. A relaxed load is
+/// a few tenths of a nanosecond against a node cost in the hundreds.
+///
+/// The counter is a read-modify-write on a shared line. If the search ever runs
+/// on more than one thread, that wants to become a per-thread count published
+/// periodically -- but the flag read should stay on every node.
 #[inline]
 fn count_node_and_should_stop() -> bool {
-    let seen = NODES.fetch_add(1, Ordering::Relaxed);
-    seen & 0x7FF == 0 && STOP.load(Ordering::Relaxed)
+    NODES.fetch_add(1, Ordering::Relaxed);
+    STOP.load(Ordering::Relaxed)
 }
 
 pub fn nega_max_alpha_beta_best_move(
