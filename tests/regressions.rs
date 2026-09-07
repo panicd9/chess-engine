@@ -328,3 +328,33 @@ fn fresh_positions_are_not_repetitions() {
     history.push(&cb);
     assert!(!history.repeats(&cb), "halfmove clock 0 cannot be a repetition");
 }
+
+/// Killer moves are an ordering heuristic, so they must not change what the
+/// search concludes -- only how fast it gets there. A wrong killer bonus that
+/// leaked into scoring would show up here.
+#[test]
+fn move_ordering_does_not_change_the_result() {
+    // Each of these has an unambiguous best move at this depth.
+    for (fen, expected_move) in [
+        ("6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1", "a1a8"),          // mate in 1
+        ("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4", "f3f7"),
+    ] {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        // The same position searched twice must agree with itself, including
+        // once the killer table has been warmed by a previous search.
+        let mut state = History::new();
+        let (first, first_pos) = nega_max_alpha_beta_best_move(&cb, 4, true, A, B, &mut state);
+        let (second, second_pos) = nega_max_alpha_beta_best_move(&cb, 4, true, A, B, &mut state);
+        assert_eq!(first, second, "score changed on a re-search of {fen}");
+        assert_eq!(
+            chess_engine::notation::describe_move(&cb, &first_pos),
+            chess_engine::notation::describe_move(&cb, &second_pos),
+            "best move changed on a re-search of {fen}"
+        );
+        assert_eq!(
+            chess_engine::notation::describe_move(&cb, &first_pos).as_deref(),
+            Some(expected_move),
+            "wrong best move in {fen}"
+        );
+    }
+}

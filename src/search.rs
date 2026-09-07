@@ -11,21 +11,58 @@ use crate::{
 /// Half-moves without a capture or a pawn move after which the game is drawn.
 pub const FIFTY_MOVE_PLIES: u32 = 100;
 
+/// Deepest ply the killer table covers. Searches never get near this.
+const MAX_PLY: usize = 64;
+
 /// Zobrist keys of the positions on the path from the game's start to the node
-/// being searched.
+/// being searched, plus the killer moves found at each ply.
 ///
 /// Repetition is a property of the whole game, not of the current position, so
 /// the search cannot detect it from the board alone -- it needs the positions
 /// that came before. The UCI layer seeds this from `position ... moves` and the
 /// search pushes and pops as it descends.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct History {
     keys: Vec<u64>,
+    /// Two killer moves per ply. A killer is a quiet move that caused a beta
+    /// cutoff somewhere else at the same depth: if it refuted one line it will
+    /// often refute a sibling, so it is worth trying early. Captures are
+    /// already ordered by MVV-LVA, so this is what orders the quiet moves.
+    ///
+    /// A move is identified by the squares it vacated and filled -- see
+    /// [`move_key`] -- because `Move` carries a whole board rather than a
+    /// from/to pair.
+    killers: Box<[[u64; 2]; MAX_PLY]>,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl History {
     pub fn new() -> Self {
-        History { keys: Vec::with_capacity(64) }
+        History {
+            keys: Vec::with_capacity(64),
+            killers: Box::new([[0; 2]; MAX_PLY]),
+        }
+    }
+
+    /// Remember a quiet move that caused a cutoff at this ply.
+    fn store_killer(&mut self, ply: usize, key: u64) {
+        if ply >= MAX_PLY || key == 0 {
+            return;
+        }
+        let slot = &mut self.killers[ply];
+        if slot[0] != key {
+            slot[1] = slot[0]; // Keep the previous one as the second choice.
+            slot[0] = key;
+        }
+    }
+
+    fn is_killer(&self, ply: usize, key: u64) -> bool {
+        ply < MAX_PLY && (self.killers[ply][0] == key || self.killers[ply][1] == key)
     }
 
     pub fn push(&mut self, cb: &Chessboard) {
@@ -105,6 +142,21 @@ pub fn nega_max_alpha_beta_best_move(
     beta: i32,
     history: &mut History,
 ) -> (i32, Chessboard) {
+    search_node(cb, depth, 0, is_white_turn, alpha, beta, history)
+}
+
+/// `ply` is the distance from the root, which is what the killer table is
+/// indexed by: a move that refutes something at ply 4 is only relevant to other
+/// nodes at ply 4.
+fn search_node(
+    cb: &Chessboard,
+    depth: u32,
+    ply: usize,
+    is_white_turn: bool,
+    mut alpha: i32,
+    beta: i32,
+    history: &mut History,
+) -> (i32, Chessboard) {
     // Quiescence counts its own nodes, so leave the leaf to it rather than
     // counting this position twice.
     if depth == 0 {
@@ -132,6 +184,24 @@ pub fn nega_max_alpha_beta_best_move(
         return (terminal_score(cb, is_white_turn, depth), *cb);
     }
 
+    // Promote this ply's killers so the lazy selection in `next_move` picks
+    // them ahead of the other quiet moves. Only quiet moves are promoted:
+    // a capture already outranks the bonus.
+    let parent_occupancy = if is_white_turn {
+        cb.get_white_occupancy()
+    } else {
+        cb.get_black_occupancy()
+    };
+    if ply < MAX_PLY {
+        for m in &mut legal_moves.moves {
+            if m.score < KILLER_BONUS
+                && history.is_killer(ply, move_key(parent_occupancy, &m.chessboard, is_white_turn))
+            {
+                m.score = KILLER_BONUS;
+            }
+        }
+    }
+
 
     // Iterate over moves.
     'legal_moves: while let Some(next_move) = legal_moves.next_move() {
@@ -149,9 +219,10 @@ pub fn nega_max_alpha_beta_best_move(
         let score = if history.repeats(&pos) || pos.halfmove_clock >= FIFTY_MOVE_PLIES {
             DRAW
         } else {
-            let child_result = nega_max_alpha_beta_best_move(
+            let child_result = search_node(
                 &pos,
                 depth - 1,
+                ply + 1,
                 !is_white_turn,
                 safe_beta,
                 safe_alpha,
@@ -170,6 +241,13 @@ pub fn nega_max_alpha_beta_best_move(
         // Update alpha and do a beta cutoff if possible.
         alpha = alpha.max(score);
         if alpha >= beta {
+            // This move refuted the line. Remember it as a killer so sibling
+            // nodes at the same ply try it early. Captures are excluded: they
+            // are already ordered by MVV-LVA, and a killer slot spent on one is
+            // a slot not spent on the quiet move that needed the help.
+            if next_move.score < KILLER_BONUS {
+                history.store_killer(ply, move_key(parent_occupancy, &pos, is_white_turn));
+            }
             break 'legal_moves; // Beta cutoff.
         }
     }
@@ -425,6 +503,25 @@ pub fn terminal_score(cb: &Chessboard, is_white_turn: bool, depth: u32) -> i32 {
 
     i32::MIN + (MATE_BOUND - depth as i32)
 }
+
+/// Identifies a move by the squares the moving side vacated and filled.
+///
+/// Move generation hands back positions rather than moves, so this is the
+/// cheapest available handle on "which move was that": six ORs for the child's
+/// occupancy against the parent's, which the caller computes once per node.
+#[inline]
+fn move_key(parent_occupancy: u64, child: &Chessboard, is_white_turn: bool) -> u64 {
+    let child_occupancy = if is_white_turn {
+        child.get_white_occupancy()
+    } else {
+        child.get_black_occupancy()
+    };
+    parent_occupancy ^ child_occupancy
+}
+
+/// Ordering bonus for a killer move: above every quiet move, below every
+/// capture, so MVV-LVA still leads.
+const KILLER_BONUS: u32 = 9;
 
 /// Score of a drawn position, from either side's point of view.
 pub const DRAW: i32 = 0;
