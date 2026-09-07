@@ -1,0 +1,103 @@
+# chess-engine
+
+A bitboard chess engine in Rust, with a UCI interface and a terminal UI.
+
+## Commands
+
+```sh
+cargo build --release
+cargo test --release            # ~2s; do NOT run tests in debug unless testing overflow
+cargo test --release -- --ignored   # deep perft, minutes to hours
+cargo bench                     # criterion: perft and search
+
+./target/release/chess-engine            # speak UCI on stdin/stdout
+./target/release/chess-engine play [FEN] # terminal board
+```
+
+Always benchmark and play in `--release`. Debug builds are ~20x slower and the
+engine is unusable in them.
+
+## Layout
+
+- `chessboard.rs` — `Chessboard` (the position), FEN parsing, and the `make_*`
+  helpers that build a new board per move. Copy-make: every move produces a
+  whole new 184-byte board.
+- `move_gen/` — one module per piece, each with `*_legal_moves`. Legality is
+  checked by making the move and testing `is_*_king_under_attack`.
+- `move_gen/check_and_make_move.rs` — validates a move given from/to, for
+  `Chessboard::make_move`. See "Known traps".
+- `search.rs` — negamax + alpha-beta + quiescence, killer ordering, repetition
+  and fifty-move detection, the `STOP`/`NODES` statics.
+- `eval.rs` + `piece_square_tables.rs` — tapered PeSTO-style eval, from white's
+  point of view.
+- `uci.rs` — the UCI protocol; `playing_ui.rs` — the terminal game.
+- `notation.rs` — UCI move parsing and rendering.
+- `zobrist.rs` — position hashing, used by repetition detection.
+- `perft.rs` — move generation correctness.
+
+## Invariants worth knowing
+
+**Move generation returns positions, not moves.** `legal_moves()` yields
+`move_list::Move { chessboard, score }` — a whole board plus an ordering score.
+There is no from/to anywhere. To name a move you diff two boards
+(`notation::describe_move`); to identify one cheaply inside the search you XOR
+the mover's occupancy before and after. Both are workarounds for the missing
+from/to.
+
+**`piece_square` must agree with the bitboards.** It is a redundant 64-entry
+view, and the capture helpers read it to decide which piece to remove. When the
+two drift, evaluation silently reads a piece that is not there and captures can
+remove the wrong one. Two shipped bugs were exactly this. `tests/regressions.rs`
+asserts the invariant over a move tree — keep it passing.
+
+**`evaluate()` is from white's point of view.** Negamax needs it relative to the
+side to move; the search negates for black. Getting this wrong is silent and
+only shows up at odd depths.
+
+**Search scores are relative to the side to move.** Mate scores are
+`i32::MIN + (MATE_BOUND - depth)`; `search::mate_in_plies` is the only place
+that decodes them. Do not reimplement that arithmetic elsewhere.
+
+## Known traps
+
+- `check_and_make_move.rs` duplicates the move generator, with `if x != to { continue }`
+  filters injected. Two bugs came from a branch forgetting its filter: a
+  capture-promotion returned a quiet promotion on the wrong square, and en
+  passant answered any request that reached it. **If you touch a branch there,
+  check it compares against the requested destination and tests legality.**
+- `Chessboard` is `Copy` and cloned at every node, so its size is on the hot
+  path. `ColoredPiece` must stay `#[repr(u8)]` — `repr(usize)` made
+  `piece_square` 512 bytes and cost a third of move generation throughput.
+  `tests/regressions.rs::board_stays_small` guards this.
+- The stop flag is read on **every** node. Sampling it (every Nth node) only
+  gates the check, not the work, so an abort trickles through the tree instead
+  of unwinding it and time limits overshoot by ~100ms.
+- `from_fen` rejects positions with a missing king or the waiting side in check.
+  Without that the move generator indexes `KING_ATTACKS[64]` and panics.
+- Files are CRLF; `.gitattributes` pins `eol=lf` for new work. Existing files
+  are not renormalised, so avoid whole-file rewrites — they show up as
+  thousands of changed lines.
+
+## Testing
+
+`cargo test --release` runs in ~2s and is the gate for everything:
+
+- `src/perft.rs` — 26 assertions over the 6 standard perft positions. This is
+  the oracle for move generation; if it passes, generation is almost certainly
+  correct.
+- `tests/regressions.rs` — one test per bug ever fixed, plus the
+  `piece_square` invariant and a describe/parse/make round trip over every legal
+  move in seven positions.
+- `tests/uci.rs` — drives the real binary over stdin/stdout.
+- `tests/fen_positions.rs` — billion-node perft, `#[ignore]`d.
+
+`perft` only exercises move *generation*. `make_move` is a separate path used
+only by UCI and the terminal UI, and both bugs found there were invisible to
+perft — cover it with round-trip tests instead.
+
+## Measuring changes
+
+Search changes must be measured, not argued. Save the current binary, make the
+change, then compare nodes-to-fixed-depth and run an A/B match with
+`cutechess-cli` (installed in `~/.local/bin`). Node counts and Elo do not scale
+together — a 47% node reduction bought +51 Elo.
