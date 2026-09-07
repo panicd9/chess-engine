@@ -6,7 +6,7 @@ use crate::{
     },
     perft::{compare_boards, format_move},
     piece::PromotionPiece,
-    search::{nega_max_alpha_beta, nega_max_alpha_beta_best_line, nega_max_alpha_beta_best_move},
+    search::{nega_max_alpha_beta_best_line, nega_max_alpha_beta_best_move},
 };
 use crossterm::style::{Attribute, Color as TextColor, ResetColor, SetBackgroundColor, SetForegroundColor};
 use std::{

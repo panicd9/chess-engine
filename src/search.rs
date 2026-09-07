@@ -327,49 +327,6 @@ fn safe_neg(value: i32) -> i32 {
     }
 }
 
-pub fn nega_max_alpha_beta(
-    cb: &Chessboard,
-    depth: u32,
-    alpha: i32,
-    beta: i32,
-) -> (i32, Chessboard) {
-    if depth == 0 {
-        // Evaluate from the perspective of the current player
-        return (evaluate(cb), cb.clone());
-    }
-
-    let legal_positions = legal_moves(cb); // Assume this returns moves for the current player
-
-    let mut max = i32::MIN;
-    let mut best_move = cb.clone();
-    let mut alpha = alpha;
-
-    for pos in &legal_positions {
-        // Note: We pass -beta and -alpha and then negate the returned score.
-        let (child_score, _) = nega_max_alpha_beta(&pos.chessboard, depth - 1, -beta, -alpha);
-        let score = if child_score == i32::MIN {
-            i32::MAX // handle the overflow case
-        } else {
-            -child_score
-        };
-
-        if score > max {
-            max = score;
-            best_move = pos.chessboard;
-        }
-
-        alpha = alpha.max(max);
-        if alpha >= beta {
-            break; // Beta cut-off
-        }
-    }
-
-    // if legal_positions.is_empty() {
-    //     return (i64::MIN + 1, cb.clone());
-    // }
-    (max, best_move)
-}
-
 // pub fn nega_max_alpha_beta_best_line(
 //     cb: &Chessboard,
 //     depth: u32,
