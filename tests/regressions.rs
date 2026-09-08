@@ -492,3 +492,34 @@ fn make_move_plays_exactly_what_was_asked() {
         }
     }
 }
+
+/// Null-move pruning assumes having the move is an advantage. In a king-and-pawn
+/// endgame that is false -- in zugzwang every move worsens the position -- so
+/// the heuristic has to be switched off when only pawns remain, or the search
+/// will prune away the very lines that decide the game.
+#[test]
+fn null_move_is_disabled_without_pieces() {
+    // Classic opposition: white to move draws, black to move loses. If null
+    // move were applied here the search would conclude the position is winning
+    // for whoever is not to move, which is exactly backwards.
+    let cb = Chessboard::from_fen("8/8/8/4k3/8/4K3/4P3/8 w - - 0 1").unwrap();
+    let mut state = History::new();
+    state.ensure_table(16);
+    let (score, _) = nega_max_alpha_beta_best_move(&cb, 6, true, A, B, &mut state);
+    // White is a pawn up but the black king holds the opposition; the score
+    // should be modest, not a runaway win from a bad null-move cutoff.
+    assert!(
+        score.abs() < 500,
+        "king-and-pawn endgame scored {score}; null move likely fired in zugzwang"
+    );
+
+    // And a mate must still be found in a pawnless position, where null move is
+    // also disabled.
+    let mate = Chessboard::from_fen("6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1").unwrap();
+    let (score, pos) = nega_max_alpha_beta_best_move(&mate, 4, true, A, B, &mut History::new());
+    assert!(score > (1 << 19), "should still see the mate, scored {score}");
+    assert_eq!(
+        chess_engine::notation::describe_move(&mate, &pos).as_deref(),
+        Some("a1a8")
+    );
+}

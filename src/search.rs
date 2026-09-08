@@ -227,6 +227,37 @@ fn search_node(
         }
     }
 
+    // Null-move pruning. Hand the opponent a free move: if our position is so
+    // strong that they still cannot pull it below beta, then a real move will
+    // be at least as good and this whole node can be cut.
+    //
+    // Skipped at the root, because there we must return an actual move; when in
+    // check, because passing would be illegal; and with only pawns left, where
+    // the "having the move helps" assumption fails.
+    if ply > 0
+        && depth > NULL_MOVE_REDUCTION
+        && beta < MATE_SCORE_THRESHOLD
+        && has_pieces(cb, is_white_turn)
+        && !in_check(cb, is_white_turn)
+    {
+        let mut passed = *cb;
+        passed.change_side_to_move();
+        passed.en_passant = 0; // The chance to capture en passant does not survive a pass.
+        let score = -search_node(
+            &passed,
+            depth - 1 - NULL_MOVE_REDUCTION,
+            ply + 1,
+            !is_white_turn,
+            -beta,
+            -beta + 1, // Null window: we only care whether it beats beta.
+            history,
+        )
+        .0;
+        if score >= beta && !is_mate_score(score) {
+            return (score, *cb);
+        }
+    }
+
     // We'll track the best score and best resulting position.
     let mut best_score = i32::MIN;
     let mut best_pos: Chessboard = *cb;
@@ -622,6 +653,33 @@ const KILLER_BONUS: u32 = 9;
 /// Ordering bonus for the table's move, which outranks everything: it is the
 /// best move a previous, usually deeper, search found here.
 const TT_MOVE_BONUS: u32 = 1000;
+
+/// How much shallower the null-move verification search runs. Two plies is the
+/// usual choice: deep enough to be meaningful, shallow enough to be cheap.
+const NULL_MOVE_REDUCTION: u32 = 2;
+
+/// Is the side to move in check?
+fn in_check(cb: &Chessboard, is_white_turn: bool) -> bool {
+    if is_white_turn {
+        cb.is_white_king_under_attack()
+    } else {
+        cb.is_black_king_under_attack()
+    }
+}
+
+/// Does the side to move have anything but pawns and a king?
+///
+/// Null-move pruning assumes having the move is an advantage. In king-and-pawn
+/// endgames that is false -- in zugzwang every move worsens the position -- so
+/// the heuristic is switched off when only pawns remain.
+fn has_pieces(cb: &Chessboard, is_white_turn: bool) -> bool {
+    let pieces = if is_white_turn {
+        cb.white_knights | cb.white_bishops | cb.white_rooks | cb.white_queens
+    } else {
+        cb.black_knights | cb.black_bishops | cb.black_rooks | cb.black_queens
+    };
+    pieces != 0
+}
 
 /// Score of a drawn position, from either side's point of view.
 pub const DRAW: i32 = 0;
