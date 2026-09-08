@@ -26,11 +26,59 @@ const MAX_DEPTH: u32 = 64;
 /// Assumed remaining moves when the GUI does not send `movestogo`.
 const EXPECTED_MOVES_LEFT: u64 = 30;
 
-/// Transposition table size. Not yet exposed as a UCI `Hash` option.
-const TABLE_MEGABYTES: usize = 64;
+/// Default transposition table size, overridable with `setoption name Hash`.
+const DEFAULT_TABLE_MEGABYTES: usize = 64;
+const MIN_TABLE_MEGABYTES: usize = 1;
+const MAX_TABLE_MEGABYTES: usize = 1024;
 
-/// Held back from every time budget for process and I/O jitter.
-const SAFETY_MARGIN: Duration = Duration::from_millis(30);
+/// Default time held back from every budget, overridable with
+/// `setoption name Move Overhead`. GUIs raise it when the connection is slow.
+const DEFAULT_MOVE_OVERHEAD_MS: u64 = 30;
+
+/// Options a GUI may set. Anything else is accepted and ignored, as the
+/// protocol requires.
+#[derive(Clone, Copy)]
+struct Options {
+    table_megabytes: usize,
+    move_overhead: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            table_megabytes: DEFAULT_TABLE_MEGABYTES,
+            move_overhead: Duration::from_millis(DEFAULT_MOVE_OVERHEAD_MS),
+        }
+    }
+}
+
+impl Options {
+    /// Parse `setoption name <name> value <value>`. Names may contain spaces,
+    /// so the split is on the ` value ` separator rather than on whitespace.
+    fn apply(&mut self, line: &str) {
+        let Some(rest) = line.trim().strip_prefix("setoption") else { return };
+        let Some(rest) = rest.trim_start().strip_prefix("name ") else { return };
+        let (name, value) = match rest.split_once(" value ") {
+            Some((name, value)) => (name.trim(), value.trim()),
+            None => (rest.trim(), ""),
+        };
+        match name.to_ascii_lowercase().as_str() {
+            "hash" => {
+                if let Ok(mb) = value.parse::<usize>() {
+                    self.table_megabytes = mb.clamp(MIN_TABLE_MEGABYTES, MAX_TABLE_MEGABYTES);
+                }
+            }
+            "move overhead" => {
+                if let Ok(ms) = value.parse::<u64>() {
+                    self.move_overhead = Duration::from_millis(ms.min(5000));
+                }
+            }
+            _ => {} // Unknown options are ignored rather than refused.
+        }
+    }
+}
+
+
 
 /// What `go` asked for.
 #[derive(Debug, Default, Clone)]
@@ -47,12 +95,12 @@ struct Limits {
 
 impl Limits {
     /// How long to think, or `None` to search until told to stop.
-    fn budget(&self, side_to_move: Color) -> Option<Duration> {
+    fn budget(&self, side_to_move: Color, overhead: Duration) -> Option<Duration> {
         if self.infinite {
             return None;
         }
         if let Some(ms) = self.movetime {
-            return Some(Duration::from_millis(ms).saturating_sub(SAFETY_MARGIN));
+            return Some(Duration::from_millis(ms).saturating_sub(overhead));
         }
 
         let (remaining, increment) = match side_to_move {
@@ -73,13 +121,14 @@ impl Limits {
         // not.
         let share = remaining / self.movestogo.unwrap_or(EXPECTED_MOVES_LEFT).max(1);
         let target = (share + increment * 3 / 4).min(remaining / 3);
-        Some(Duration::from_millis(target).saturating_sub(SAFETY_MARGIN))
+        Some(Duration::from_millis(target).saturating_sub(overhead))
     }
 }
 
 pub fn run() -> io::Result<()> {
     let mut board = Chessboard::new_initial_board();
     let mut history = History::new();
+    let mut options = Options::default();
     let mut worker: Option<thread::JoinHandle<()>> = None;
 
     let stdin = io::stdin();
@@ -92,8 +141,17 @@ pub fn run() -> io::Result<()> {
             "uci" => {
                 println!("id name {NAME}");
                 println!("id author {AUTHOR}");
+                println!(
+                    "option name Hash type spin default {DEFAULT_TABLE_MEGABYTES} \
+                     min {MIN_TABLE_MEGABYTES} max {MAX_TABLE_MEGABYTES}"
+                );
+                println!(
+                    "option name Move Overhead type spin default {DEFAULT_MOVE_OVERHEAD_MS} \
+                     min 0 max 5000"
+                );
                 println!("uciok");
             }
+            "setoption" => options.apply(&line),
             "isready" => println!("readyok"),
             "ucinewgame" => {
                 stop_search(&mut worker);
@@ -114,7 +172,9 @@ pub fn run() -> io::Result<()> {
                 stop_search(&mut worker);
                 let limits = parse_go(&line);
                 let history = history.clone();
-                worker = Some(thread::spawn(move || search_and_report(board, limits, history)));
+                let options = options;
+                worker =
+                    Some(thread::spawn(move || search_and_report(board, limits, history, options)));
             }
             "stop" => stop_search(&mut worker),
             "quit" => {
@@ -144,9 +204,9 @@ fn stop_search(worker: &mut Option<thread::JoinHandle<()>>) {
 /// Iterative deepening. Each completed depth replaces the move to play; a depth
 /// cut short by the clock is thrown away, because its score came from a
 /// half-searched tree.
-fn search_and_report(board: Chessboard, limits: Limits, mut history: History) {
+fn search_and_report(board: Chessboard, limits: Limits, mut history: History, options: Options) {
     let started = Instant::now();
-    let budget = limits.budget(board.side_to_move);
+    let budget = limits.budget(board.side_to_move, options.move_overhead);
     let deadline = budget.map(|b| started + b);
 
     // A watchdog stops the search when the budget runs out. It is woken early
@@ -164,7 +224,7 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History) {
     let is_white = board.side_to_move == Color::White;
     let max_depth = limits.depth.unwrap_or(MAX_DEPTH);
     search::reset_nodes();
-    history.ensure_table(TABLE_MEGABYTES);
+    history.ensure_table(options.table_megabytes);
 
     let mut best: Option<Chessboard> = None;
 
