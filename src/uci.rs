@@ -62,6 +62,15 @@ impl Limits {
 
         // Spend an even share of the remaining time plus most of the increment,
         // but never more than a third of the clock on a single move.
+        //
+        // These constants are conventional rather than tuned. A more aggressive
+        // variant (share of 20, full increment) leaves 4% of the clock unused
+        // instead of 12%, but measured +1.4 +/- 40.3 Elo over 240 games -- no
+        // difference. Note that test could not have resolved the ~20 Elo the
+        // extra time is theoretically worth; that needs ~1000 games. The bigger
+        // win is probably not here at all but in spending unevenly: more when
+        // the best move keeps changing between iterations, less when it does
+        // not.
         let share = remaining / self.movestogo.unwrap_or(EXPECTED_MOVES_LEFT).max(1);
         let target = (share + increment * 3 / 4).min(remaining / 3);
         Some(Duration::from_millis(target).saturating_sub(SAFETY_MARGIN))
