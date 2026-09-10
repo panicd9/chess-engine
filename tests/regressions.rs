@@ -608,3 +608,30 @@ fn principal_variation_is_playable() {
         assert_ne!(line[0].side_to_move, cb.side_to_move, "side did not alternate");
     }
 }
+
+/// Static exchange evaluation must correctly value a capture sequence, so the
+/// search can tell a winning capture from one that hangs a piece.
+#[test]
+fn static_exchange_evaluation_is_correct() {
+    use chess_engine::see::see;
+
+    // (fen, from, to, expected, description)
+    let cases: &[(&str, usize, usize, i32, &str)] = &[
+        // Rook takes an undefended pawn on e5: wins a clean pawn.
+        ("4k3/8/8/4p3/8/8/8/4R1K1 w - - 0 1", 4, 36, 100, "Rxe5, pawn is free"),
+        // Same, but the pawn is defended by a pawn on f6: rook for pawn, losing.
+        ("4k3/8/5p2/4p3/8/8/8/4R1K1 w - - 0 1", 4, 36, 100 - 500, "Rxe5 loses the rook"),
+        // Queen takes a pawn defended by a pawn: queen for pawn.
+        ("4k3/8/5p2/4p3/8/8/8/3QK3 w - - 0 1", 3, 36, 100 - 900, "Qxe5 loses the queen"),
+        // Equal trade: rook takes rook, recaptured by a rook.
+        ("4k3/4r3/8/4r3/8/8/4R3/4K3 w - - 0 1", 12, 36, 0, "Rxe5 Rxe5, even"),
+        // Undefended piece is simply won.
+        ("4k3/8/8/4n3/8/8/8/4R1K1 w - - 0 1", 4, 36, 320, "Rxe5 wins a knight"),
+    ];
+
+    for (fen, from, to, expected, what) in cases {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        let got = see(&cb, *from, *to);
+        assert_eq!(got, *expected, "{what} in {fen}: see said {got}, expected {expected}");
+    }
+}

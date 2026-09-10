@@ -527,7 +527,21 @@ pub fn quiescence_search_best_move(
     }
 
     // Generate only "noisy" moves (e.g., captures).
-    let capture_moves: Vec<_> = all_moves.into_iter().filter(|m| m.score >= 6).collect();
+    // Keep the captures, then drop the ones that plainly lose material.
+    // Quiescence exists to resolve exchanges, not to explore a queen taking a
+    // defended pawn -- static exchange evaluation settles those without a
+    // search. Captures that come out level or better are kept; a losing one can
+    // only be right as a sacrifice, which is beyond what quiescence looks for.
+    let parent_occupancy = if is_white_turn {
+        cb.get_white_occupancy()
+    } else {
+        cb.get_black_occupancy()
+    };
+    let capture_moves: Vec<_> = all_moves
+        .into_iter()
+        .filter(|m| m.score >= 6)
+        .filter(|m| !loses_material(cb, parent_occupancy, &m.chessboard, is_white_turn))
+        .collect();
 
     if capture_moves.is_empty() {
         return (best_score, best_board);
@@ -813,6 +827,40 @@ pub fn principal_variation(
     }
 
     line
+}
+
+/// Does this capture lose material once the exchange plays out?
+///
+/// Move generation yields positions rather than moves, so the squares involved
+/// are recovered by diffing the mover's occupancy: the square it left and the
+/// one it arrived on.
+fn loses_material(
+    parent: &Chessboard,
+    parent_occupancy: u64,
+    child: &Chessboard,
+    is_white_turn: bool,
+) -> bool {
+    let child_occupancy = if is_white_turn {
+        child.get_white_occupancy()
+    } else {
+        child.get_black_occupancy()
+    };
+    let vacated = parent_occupancy & !child_occupancy;
+    let filled = child_occupancy & !parent_occupancy;
+
+    // Castling moves two pieces and en passant captures off the target square;
+    // neither is an exchange worth statically resolving, so leave them alone.
+    if vacated.count_ones() != 1 || filled.count_ones() != 1 {
+        return false;
+    }
+
+    let from = vacated.trailing_zeros() as usize;
+    let to = filled.trailing_zeros() as usize;
+    if parent.piece_square[to] == crate::piece::ColoredPiece::Empty {
+        return false; // En passant or a promotion push, not a capture on `to`.
+    }
+
+    crate::see::see(parent, from, to) < 0
 }
 
 fn safe_neg(value: i32) -> i32 {

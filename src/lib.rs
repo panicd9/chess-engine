@@ -17,3 +17,4 @@ pub mod notation;
 pub mod uci;
 pub mod zobrist;
 pub mod tt;
+pub mod see;
