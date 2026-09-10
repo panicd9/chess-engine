@@ -61,9 +61,15 @@ pub mod weights {
 }
 
 /// Bonus for a passed pawn, by the rank it has reached (from its own side's
-/// point of view). A pawn one step from promoting is worth close to a piece.
-/// Scaled by `weights::PASSED_PAWN_SCALE`.
-const PASSED_PAWN_BY_RANK: [i32; 8] = [0, 5, 10, 20, 40, 70, 120, 0];
+/// point of view). Scaled by `weights::PASSED_PAWN_SCALE`.
+///
+/// These are half the values originally guessed at. Doubling them measured
+/// clearly worse (-53 Elo), so the first set was too generous. Halving looked
+/// like a gain in a 160-game run but did not reproduce over 240 games at a
+/// longer control (0.0 +/- 38), so treat this as "no worse, and safer" rather
+/// than a tuned improvement. Ten candidates were tested at +/-50 error bars,
+/// which is enough for one to look significant by chance.
+const PASSED_PAWN_BY_RANK: [i32; 8] = [0, 3, 5, 10, 20, 35, 60, 0];
 
 pub fn evaluate(cb: &Chessboard) -> i32 {
     eval(&cb.piece_square, &EVAL_TABLES) + mobility(cb) + king_safety(cb) + passed_pawns(cb)
