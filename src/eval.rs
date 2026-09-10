@@ -15,18 +15,54 @@
 use crate::chessboard::{Chessboard, FILE_MASKS};
 use crate::piece_square_tables::{eval, EVAL_TABLES};
 
-/// Centipawns per square of mobility, per piece type. Sliders benefit most from
-/// open lines, so they are weighted higher than knights.
-const KNIGHT_MOBILITY: i32 = 4;
-const BISHOP_MOBILITY: i32 = 4;
-const ROOK_MOBILITY: i32 = 2;
-const QUEEN_MOBILITY: i32 = 1;
+/// The weights these terms use, all in centipawns.
+///
+/// Overridable at runtime so they can be tuned by playing matches rather than
+/// by rebuilding for each candidate: see the `EvalWeight` UCI options. The
+/// defaults are hand-picked starting points, not tuned values.
+pub mod weights {
+    use std::sync::atomic::{AtomicI32, Ordering};
 
-/// Penalty for each missing pawn of the three in front of a castled king.
-const MISSING_SHIELD_PAWN: i32 = 12;
+    /// Per square of mobility, by piece. Sliders gain most from open lines, so
+    /// they are weighted above knights.
+    pub static KNIGHT_MOBILITY: AtomicI32 = AtomicI32::new(4);
+    pub static BISHOP_MOBILITY: AtomicI32 = AtomicI32::new(4);
+    pub static ROOK_MOBILITY: AtomicI32 = AtomicI32::new(2);
+    pub static QUEEN_MOBILITY: AtomicI32 = AtomicI32::new(1);
+
+    /// Per missing pawn of the three in front of a castled king.
+    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(12);
+
+    /// Scales the passed pawn bonus, as a percentage. 100 leaves the by-rank
+    /// table below unchanged.
+    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(100);
+
+    /// Set a weight by name. Unknown names are ignored, as UCI requires.
+    /// Returns whether the name was recognised.
+    pub fn set(name: &str, value: i32) -> bool {
+        // Case-insensitive: GUIs are inconsistent about how they echo names.
+        let target = match name.to_ascii_lowercase().as_str() {
+            "knightmobility" => &KNIGHT_MOBILITY,
+            "bishopmobility" => &BISHOP_MOBILITY,
+            "rookmobility" => &ROOK_MOBILITY,
+            "queenmobility" => &QUEEN_MOBILITY,
+            "kingshield" => &MISSING_SHIELD_PAWN,
+            "passedpawnscale" => &PASSED_PAWN_SCALE,
+            _ => return false,
+        };
+        target.store(value, Ordering::Relaxed);
+        true
+    }
+
+    #[inline]
+    pub fn get(w: &AtomicI32) -> i32 {
+        w.load(Ordering::Relaxed)
+    }
+}
 
 /// Bonus for a passed pawn, by the rank it has reached (from its own side's
 /// point of view). A pawn one step from promoting is worth close to a piece.
+/// Scaled by `weights::PASSED_PAWN_SCALE`.
 const PASSED_PAWN_BY_RANK: [i32; 8] = [0, 5, 10, 20, 40, 70, 120, 0];
 
 pub fn evaluate(cb: &Chessboard) -> i32 {
@@ -38,14 +74,20 @@ pub fn evaluate(cb: &Chessboard) -> i32 {
 /// Counts attacked squares rather than legal moves, which is cheaper and close
 /// enough: a piece that eyes many squares is usually the more active one.
 fn mobility(cb: &Chessboard) -> i32 {
-    let white = cb.white_knights_attacks().count_ones() as i32 * KNIGHT_MOBILITY
-        + cb.white_bishops_attacks().count_ones() as i32 * BISHOP_MOBILITY
-        + cb.white_rooks_attacks().count_ones() as i32 * ROOK_MOBILITY
-        + cb.white_queens_attacks().count_ones() as i32 * QUEEN_MOBILITY;
-    let black = cb.black_knights_attacks().count_ones() as i32 * KNIGHT_MOBILITY
-        + cb.black_bishops_attacks().count_ones() as i32 * BISHOP_MOBILITY
-        + cb.black_rooks_attacks().count_ones() as i32 * ROOK_MOBILITY
-        + cb.black_queens_attacks().count_ones() as i32 * QUEEN_MOBILITY;
+    let (knight, bishop, rook, queen) = (
+        weights::get(&weights::KNIGHT_MOBILITY),
+        weights::get(&weights::BISHOP_MOBILITY),
+        weights::get(&weights::ROOK_MOBILITY),
+        weights::get(&weights::QUEEN_MOBILITY),
+    );
+    let white = cb.white_knights_attacks().count_ones() as i32 * knight
+        + cb.white_bishops_attacks().count_ones() as i32 * bishop
+        + cb.white_rooks_attacks().count_ones() as i32 * rook
+        + cb.white_queens_attacks().count_ones() as i32 * queen;
+    let black = cb.black_knights_attacks().count_ones() as i32 * knight
+        + cb.black_bishops_attacks().count_ones() as i32 * bishop
+        + cb.black_rooks_attacks().count_ones() as i32 * rook
+        + cb.black_queens_attacks().count_ones() as i32 * queen;
     white - black
 }
 
@@ -76,7 +118,7 @@ fn king_safety(cb: &Chessboard) -> i32 {
         // Pawns standing on the three files, ahead of the king.
         let cover = pawns & files & ahead(king);
         let missing = 3i32 - cover.count_ones().min(3) as i32;
-        -missing * MISSING_SHIELD_PAWN
+        -missing * weights::get(&weights::MISSING_SHIELD_PAWN)
     };
 
     // "Ahead" is up the board for white, down for black.
@@ -95,6 +137,7 @@ fn king_safety(cb: &Chessboard) -> i32 {
 /// file anywhere ahead of it, so nothing can block or capture it on the way.
 fn passed_pawns(cb: &Chessboard) -> i32 {
     let mut score = 0;
+    let scale = weights::get(&weights::PASSED_PAWN_SCALE);
 
     let mut pawns = cb.white_pawns;
     while pawns != 0 {
@@ -102,7 +145,7 @@ fn passed_pawns(cb: &Chessboard) -> i32 {
         pawns &= pawns - 1;
         let rank = square / 8;
         if rank < 7 && (cb.black_pawns & blocking_mask(square, true)) == 0 {
-            score += PASSED_PAWN_BY_RANK[rank];
+            score += PASSED_PAWN_BY_RANK[rank] * scale / 100;
         }
     }
 
@@ -112,7 +155,7 @@ fn passed_pawns(cb: &Chessboard) -> i32 {
         pawns &= pawns - 1;
         let rank = square / 8;
         if rank > 0 && (cb.white_pawns & blocking_mask(square, false)) == 0 {
-            score -= PASSED_PAWN_BY_RANK[7 - rank];
+            score -= PASSED_PAWN_BY_RANK[7 - rank] * scale / 100;
         }
     }
 

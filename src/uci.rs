@@ -73,7 +73,15 @@ impl Options {
                     self.move_overhead = Duration::from_millis(ms.min(5000));
                 }
             }
-            _ => {} // Unknown options are ignored rather than refused.
+            // Evaluation weights, exposed so they can be tuned by playing
+            // matches with different values rather than rebuilding each time.
+            other => {
+                if let Ok(v) = value.parse::<i32>() {
+                    // `set` reports whether it recognised the name; anything
+                    // else is ignored, as the protocol requires.
+                    let _ = crate::eval::weights::set(other, v);
+                }
+            }
         }
     }
 }
@@ -149,6 +157,16 @@ pub fn run() -> io::Result<()> {
                     "option name Move Overhead type spin default {DEFAULT_MOVE_OVERHEAD_MS} \
                      min 0 max 5000"
                 );
+                for (name, default, min, max) in [
+                    ("KnightMobility", 4, 0, 30),
+                    ("BishopMobility", 4, 0, 30),
+                    ("RookMobility", 2, 0, 30),
+                    ("QueenMobility", 1, 0, 30),
+                    ("KingShield", 12, 0, 100),
+                    ("PassedPawnScale", 100, 0, 400),
+                ] {
+                    println!("option name {name} type spin default {default} min {min} max {max}");
+                }
                 println!("uciok");
             }
             "setoption" => options.apply(&line),
