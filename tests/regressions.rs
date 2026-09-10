@@ -1,4 +1,4 @@
-use chess_engine::chessboard::Chessboard;
+use chess_engine::chessboard::{Chessboard, Color};
 use chess_engine::display::to_fen;
 use chess_engine::move_gen::legal_moves;
 use chess_engine::search::{History, nega_max_alpha_beta_best_move};
@@ -522,4 +522,89 @@ fn null_move_is_disabled_without_pieces() {
         chess_engine::notation::describe_move(&mate, &pos).as_deref(),
         Some("a1a8")
     );
+}
+
+/// Evaluation must be symmetric: mirror the position top-to-bottom, swap the
+/// colours, and the score must negate exactly. Any term that treats white and
+/// black differently -- a wrong rank index, a mask built for one direction --
+/// shows up here as an asymmetry, and would make the engine play one colour
+/// worse than the other.
+#[test]
+fn evaluation_is_colour_symmetric() {
+    use chess_engine::eval::evaluate;
+
+    fn mirror(fen: &str) -> String {
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        let ranks: Vec<String> = parts[0]
+            .split('/')
+            .rev()                       // flip the board vertically
+            .map(|r| r.chars().map(|c| {
+                if c.is_ascii_uppercase() { c.to_ascii_lowercase() }
+                else if c.is_ascii_lowercase() { c.to_ascii_uppercase() }
+                else { c }
+            }).collect())
+            .collect();
+        let side = if parts[1] == "w" { "b" } else { "w" };
+        let castling: String = if parts[2] == "-" { "-".into() } else {
+            parts[2].chars().map(|c| {
+                if c.is_ascii_uppercase() { c.to_ascii_lowercase() } else { c.to_ascii_uppercase() }
+            }).collect()
+        };
+        format!("{} {} {} - 0 1", ranks.join("/"), side, castling)
+    }
+
+    for fen in [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+        // Passed pawns on both wings.
+        "8/1P6/8/8/8/8/6p1/4K2k w - - 0 1",
+        // Broken king shield.
+        "r1bq1rk1/pp3ppp/2n5/8/8/2N5/PP3PPP/R1BQ1RK1 w - - 0 1",
+    ] {
+        let a = Chessboard::from_fen(fen).unwrap();
+        let m = mirror(fen);
+        let b = Chessboard::from_fen(&m)
+            .unwrap_or_else(|e| panic!("mirrored fen {m} rejected: {e}"));
+        assert_eq!(
+            evaluate(&a), -evaluate(&b),
+            "asymmetric evaluation:\n  {fen} -> {}\n  {m} -> {}",
+            evaluate(&a), evaluate(&b)
+        );
+    }
+}
+
+/// The principal variation must be a real, playable line -- every move legal in
+/// the position before it. It is walked out of the transposition table by
+/// matching stored move keys against generated moves, so a mismatch would
+/// produce a line that cannot actually be played.
+#[test]
+fn principal_variation_is_playable() {
+    use chess_engine::search::principal_variation;
+
+    for fen in [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    ] {
+        let cb = Chessboard::from_fen(fen).unwrap();
+        let mut state = History::new();
+        state.ensure_table(16);
+        nega_max_alpha_beta_best_move(&cb, 6, cb.side_to_move == Color::White, A, B, &mut state);
+
+        let line = principal_variation(&cb, &state.table, 12);
+        assert!(!line.is_empty(), "no principal variation for {fen}");
+
+        // Every step must be reachable by a legal move from the one before it.
+        let mut from = cb;
+        for (i, position) in line.iter().enumerate() {
+            let reachable = legal_moves(&from)
+                .into_iter()
+                .any(|m| to_fen(&m.chessboard) == to_fen(position));
+            assert!(reachable, "pv move {} is not legal in {fen}", i + 1);
+            from = *position;
+        }
+        // Alternating sides, as a real game must.
+        assert_ne!(line[0].side_to_move, cb.side_to_move, "side did not alternate");
+    }
 }

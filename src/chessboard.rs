@@ -133,7 +133,7 @@ pub(crate) const RANK_MASKS: [u64; 8] = [
     0xFF00000000000000,
 ];
 
-pub(crate) const FILE_MASKS: [u64; 8] = [
+pub const FILE_MASKS: [u64; 8] = [
     0x0101010101010101,
     0x0202020202020202,
     0x0404040404040404,

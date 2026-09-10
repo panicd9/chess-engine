@@ -248,7 +248,7 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History, op
             break;
         }
         best = Some(position);
-        report_info(&board, &position, score, depth, started);
+        report_info(&board, score, depth, started, &history);
 
         // A forced mate is as good as it gets; searching deeper cannot improve it.
         if search::mate_in_plies(score, depth).is_some() {
@@ -288,10 +288,10 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History, op
 
 fn report_info(
     root: &Chessboard,
-    best: &Chessboard,
     score: i32,
     depth: u32,
     started: Instant,
+    history: &History,
 ) {
     let elapsed = started.elapsed();
     let millis = elapsed.as_millis().max(1) as u64;
@@ -303,7 +303,19 @@ fn report_info(
         Some(plies) => format!("mate {}", (plies + 1) / 2),
         None => format!("cp {score}"),
     };
-    let pv = describe_move(root, best).unwrap_or_default();
+    // The whole line, not just the move: a GUI shows it as the engine's plan,
+    // and pondering needs the opponent's expected reply from it.
+    let mut pv = String::new();
+    let mut from = *root;
+    for position in search::principal_variation(root, &history.table, depth as usize) {
+        if let Some(mv) = describe_move(&from, &position) {
+            if !pv.is_empty() {
+                pv.push(' ');
+            }
+            pv.push_str(&mv);
+        }
+        from = position;
+    }
 
     println!(
         "info depth {depth} score {score_text} nodes {nodes} nps {nps} time {millis} pv {pv}"

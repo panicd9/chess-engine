@@ -64,6 +64,20 @@ impl TranspositionTable {
         self.entries.iter_mut().for_each(|e| *e = Entry::default());
     }
 
+    /// The move stored for this position, ignoring depth and bounds. Used to
+    /// walk the principal variation, where any remembered move is better than
+    /// none.
+    pub fn best_move(&self, key: u64) -> Option<MoveKey> {
+        if !self.is_enabled() {
+            return None;
+        }
+        let entry = &self.entries[key as usize & self.mask];
+        if entry.key != key || entry.best_move == 0 {
+            return None;
+        }
+        Some(entry.best_move)
+    }
+
     pub fn probe(&self, key: u64, depth: u32, alpha: i32, beta: i32) -> Option<Hit> {
         if !self.is_enabled() {
             return None;

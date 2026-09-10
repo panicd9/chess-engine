@@ -1,9 +1,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::{
-    chessboard::Chessboard,
+    chessboard::{Chessboard, Color},
     eval::evaluate,
-    move_gen::{black_legal_moves, white_legal_moves},
+    move_gen::{black_legal_moves, legal_moves, white_legal_moves},
     move_list::MoveList,
     tt::TranspositionTable,
     zobrist,
@@ -399,7 +399,7 @@ fn search_node(
     // A score that came from a repetition or the fifty-move rule is a property
     // of this path, not of the position, so it is not cached -- another route
     // to the same position may not be a draw at all.
-    if !is_mate_score(best_score) && !history.path_dependent {
+    if !is_mate_score(best_score) {
         let bound = if cutoff {
             Bound::Lower
         } else if best_score <= original_alpha {
@@ -407,7 +407,13 @@ fn search_node(
         } else {
             Bound::Exact
         };
-        history.table.store(key, depth, best_score, bound, best_move);
+        // A score that came from a repetition or the fifty-move rule belongs to
+        // this path, not this position, so it must not be reused. Storing it at
+        // depth 0 keeps the move -- which is still the best one found here, and
+        // is worth having for ordering and for the principal variation -- while
+        // ensuring no search deeper than 0 will ever trust the score.
+        let storable_depth = if history.path_dependent { 0 } else { depth };
+        history.table.store(key, storable_depth, best_score, bound, best_move);
     }
 
     // Propagate upwards: our caller's score depends on ours.
@@ -753,6 +759,60 @@ pub fn mate_in_plies(score: i32, depth: u32) -> Option<u32> {
         return None;
     };
     Some(depth.saturating_sub(depth_remaining.max(0) as u32))
+}
+
+/// The line the search currently believes both sides will play.
+///
+/// Walked out of the transposition table: each position remembers the move that
+/// was best there, so following those moves reconstructs the line. The table
+/// identifies a move only by the squares it touched, so the matching legal move
+/// has to be found at each step.
+///
+/// Stops at `max_len`, at the first position with nothing stored, or on a
+/// repetition -- a line that returns to a position it already visited would
+/// otherwise loop forever.
+pub fn principal_variation(
+    cb: &Chessboard,
+    table: &TranspositionTable,
+    max_len: usize,
+) -> Vec<Chessboard> {
+    let mut line = Vec::with_capacity(max_len);
+    let mut position = *cb;
+    let mut seen: Vec<u64> = Vec::with_capacity(max_len);
+
+    for _ in 0..max_len {
+        let key = zobrist::hash(&position);
+        if seen.contains(&key) {
+            break; // The line repeats; stop rather than cycle.
+        }
+        seen.push(key);
+
+        let Some(wanted) = table.best_move(key) else { break };
+
+        let is_white = position.side_to_move == Color::White;
+        let parent_occupancy = if is_white {
+            position.get_white_occupancy()
+        } else {
+            position.get_black_occupancy()
+        };
+
+        let next = legal_moves(&position)
+            .into_iter()
+            .map(|m| m.chessboard)
+            .find(|child| move_key(parent_occupancy, child, is_white) == wanted);
+
+        match next {
+            Some(child) => {
+                line.push(child);
+                position = child;
+            }
+            // The entry belongs to another position that hashed to the same
+            // slot, or the move is no longer legal. Either way the line ends.
+            None => break,
+        }
+    }
+
+    line
 }
 
 fn safe_neg(value: i32) -> i32 {
