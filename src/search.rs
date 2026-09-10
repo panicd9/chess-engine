@@ -301,6 +301,9 @@ fn search_node(
     let outer_path_dependent = history.path_dependent;
     history.path_dependent = false;
 
+    let in_check_here = in_check(cb, is_white_turn);
+    let mut moves_searched = 0usize;
+
     // Iterate over moves.
     'legal_moves: while let Some(next_move) = legal_moves.next_move() {
         // Extract the new position from the move.
@@ -320,18 +323,52 @@ fn search_node(
             history.path_dependent = true;
             DRAW
         } else {
-            let child_result = search_node(
-                &pos,
-                depth - 1,
-                ply + 1,
-                !is_white_turn,
-                safe_beta,
-                safe_alpha,
-                history,
-            );
-            -child_result.0 // Negate the child's score.
+            // Late move reductions. Once the promising moves have been tried,
+            // search what is left a ply shallower with a null window -- just
+            // enough to ask "could this beat what we already have?". Usually it
+            // cannot and the saving stands. When it might, the reduced result
+            // is untrustworthy, so the move is searched again properly.
+            //
+            // Only quiet moves late in the list are reduced: the table move,
+            // captures and killers are ordered first precisely because they are
+            // likely best, and positions in check are too sharp to skim.
+            let reduce = depth >= LMR_MIN_DEPTH
+                && moves_searched >= LMR_FIRST_REDUCED_MOVE
+                && next_move.score < FIRST_CAPTURE_SCORE
+                && !in_check_here
+                && !in_check(&pos, !is_white_turn);
+
+            let mut score = if reduce {
+                -search_node(
+                    &pos,
+                    depth - 2,
+                    ply + 1,
+                    !is_white_turn,
+                    -(alpha + 1),
+                    -alpha,
+                    history,
+                )
+                .0
+            } else {
+                i32::MIN + 1 // Sentinel: forces the full search below.
+            };
+
+            if !reduce || score > alpha {
+                score = -search_node(
+                    &pos,
+                    depth - 1,
+                    ply + 1,
+                    !is_white_turn,
+                    safe_beta,
+                    safe_alpha,
+                    history,
+                )
+                .0;
+            }
+            score
         };
         history.pop();
+        moves_searched += 1;
 
         // If this move is better, update the best score and best position.
         if score > best_score {
@@ -653,6 +690,17 @@ const KILLER_BONUS: u32 = 9;
 /// Ordering bonus for the table's move, which outranks everything: it is the
 /// best move a previous, usually deeper, search found here.
 const TT_MOVE_BONUS: u32 = 1000;
+
+/// Ordering scores at or above this mark a capture -- MVV-LVA starts at 10.
+/// Below it are quiet moves, which are what late move reductions apply to.
+const FIRST_CAPTURE_SCORE: u32 = 10;
+
+/// Moves this far down the list are searched shallower first. Ordering is good
+/// enough (table move, captures, killers) that anything this late rarely wins.
+const LMR_FIRST_REDUCED_MOVE: usize = 4;
+
+/// Below this depth there is nothing worth saving by reducing.
+const LMR_MIN_DEPTH: u32 = 3;
 
 /// How much shallower the null-move verification search runs. Two plies is the
 /// usual choice: deep enough to be meaningful, shallow enough to be cheap.
