@@ -170,3 +170,59 @@ fn short_budgets_do_not_overrun() {
         );
     }
 }
+
+/// `go ponder` searches on the opponent's clock and must stay silent until the
+/// GUI asks for a move: `ponderhit` (they played what we predicted, start the
+/// clock) or `stop` (they did not, discard it). Answering early is a protocol
+/// violation -- it was the old behaviour, and it made the engine appear to move
+/// instantly and then ignore everything that followed.
+#[test]
+fn ponder_waits_for_the_gui() {
+    let mut engine = Engine::start();
+    engine.handshake();
+
+    // Pondering: no bestmove, but it should be searching.
+    engine.send("position startpos");
+    engine.send("go ponder wtime 60000 btime 60000");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    engine.send("isready");
+    let lines = engine.read_until("readyok");
+    assert!(
+        !lines.iter().any(|l| l.starts_with("bestmove")),
+        "answered while still pondering: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("info depth")),
+        "pondering should be searching, saw no info lines: {lines:?}"
+    );
+
+    // stop: the prediction was wrong, but a move must still come back.
+    engine.send("stop");
+    let lines = engine.read_until("bestmove");
+    let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+    assert_eq!(mv.len(), 4, "expected a move after stop, got `{mv}`");
+}
+
+/// `ponderhit` converts a ponder search into a timed one, keeping what it has
+/// already computed, and the move must arrive within the budget.
+#[test]
+fn ponderhit_starts_the_clock() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos");
+    engine.send("go ponder wtime 8000 btime 8000");
+    std::thread::sleep(std::time::Duration::from_millis(800));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    let elapsed = started.elapsed();
+
+    let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+    assert_eq!(mv.len(), 4);
+    // 8s clock over ~30 moves is roughly 270ms; allow generous slack.
+    assert!(
+        elapsed.as_millis() < 3000,
+        "took {elapsed:?} after ponderhit; the clock did not start"
+    );
+}

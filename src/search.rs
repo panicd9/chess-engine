@@ -62,6 +62,13 @@ pub struct History {
     /// [`move_key`] -- because `Move` carries a whole board rather than a
     /// from/to pair.
     killers: Box<[[u64; 2]; MAX_PLY]>,
+    /// How often each quiet move has caused a cutoff anywhere in this search,
+    /// indexed by the squares it touched. Killers only help at the ply they
+    /// were found; this generalises across the whole tree, so a move that keeps
+    /// working gets tried earlier everywhere.
+    ///
+    /// Indexed by from-square and to-square, recovered from the move key.
+    history_scores: Box<[[i32; 64]; 64]>,
     /// What earlier searches -- including shallower iterative-deepening
     /// iterations -- concluded about positions seen along the way.
     pub table: TranspositionTable,
@@ -81,6 +88,7 @@ impl History {
         History {
             keys: Vec::with_capacity(64),
             killers: Box::new([[0; 2]; MAX_PLY]),
+            history_scores: Box::new([[0; 64]; 64]),
             // Left empty so cloning a game history stays cheap; the search
             // driver sizes it once before searching.
             table: TranspositionTable::new(0),
@@ -109,6 +117,30 @@ impl History {
 
     fn is_killer(&self, ply: usize, key: u64) -> bool {
         ply < MAX_PLY && (self.killers[ply][0] == key || self.killers[ply][1] == key)
+    }
+
+    /// Credit a quiet move that caused a cutoff. Deeper cutoffs count for more,
+    /// since they were harder to find and prove more.
+    fn credit_history(&mut self, key: u64, depth: u32) {
+        let Some((from, to)) = squares_of(key) else { return };
+        let score = &mut self.history_scores[from][to];
+        *score += (depth * depth) as i32;
+        // Keep the table from saturating: once any entry gets large, halve them
+        // all so recent cutoffs still move the ordering.
+        if *score > 1 << 20 {
+            for row in self.history_scores.iter_mut() {
+                for entry in row.iter_mut() {
+                    *entry /= 2;
+                }
+            }
+        }
+    }
+
+    fn history_score(&self, key: u64) -> i32 {
+        match squares_of(key) {
+            Some((from, to)) => self.history_scores[from][to],
+            None => 0,
+        }
     }
 
     pub fn push(&mut self, cb: &Chessboard) {
@@ -290,6 +322,14 @@ fn search_node(
             m.score = TT_MOVE_BONUS;
         } else if m.score < KILLER_BONUS && ply < MAX_PLY && history.is_killer(ply, key) {
             m.score = KILLER_BONUS;
+        } else if m.score < KILLER_BONUS {
+            // Remaining quiet moves are ordered by how often they have caused a
+            // cutoff elsewhere in this search. Capped below KILLER_BONUS so the
+            // ordering above it is never disturbed.
+            let h = history.history_score(key);
+            if h > 0 {
+                m.score = 1 + (h.min(1 << 16) >> 13) as u32;
+            }
         }
     }
 
@@ -303,6 +343,25 @@ fn search_node(
 
     let in_check_here = in_check(cb, is_white_turn);
     let mut moves_searched = 0usize;
+
+    // In check, search a ply deeper. Forcing sequences have few legal replies so
+    // the extra ply is cheap, and stopping in the middle of one is how an engine
+    // walks into a mate it was one move from seeing.
+    let depth = if in_check_here && ply > 0 {
+        depth + CHECK_EXTENSION
+    } else {
+        depth
+    };
+
+    // Futility pruning: close to the leaves and already far below alpha, a quiet
+    // move is unlikely to recover. The margin grows with the remaining depth.
+    // Never applied while in check, where any move may be forced.
+    let futile = !in_check_here
+        && depth <= FUTILITY_MAX_DEPTH
+        && beta < MATE_SCORE_THRESHOLD
+        && (if is_white_turn { evaluate(cb) } else { -evaluate(cb) })
+            + FUTILITY_MARGIN_PER_PLY * depth as i32
+            <= alpha;
 
     // Iterate over moves.
     'legal_moves: while let Some(next_move) = legal_moves.next_move() {
@@ -332,11 +391,22 @@ fn search_node(
             // Only quiet moves late in the list are reduced: the table move,
             // captures and killers are ordered first precisely because they are
             // likely best, and positions in check are too sharp to skim.
+            let quiet = next_move.score < FIRST_CAPTURE_SCORE;
+            let gives_check = in_check(&pos, !is_white_turn);
+
+            // Skip quiet moves that cannot realistically reach alpha. One move
+            // is always searched, so the node still returns something.
+            if futile && quiet && !gives_check && moves_searched > 0 {
+                history.pop();
+                moves_searched += 1;
+                continue 'legal_moves;
+            }
+
             let reduce = depth >= LMR_MIN_DEPTH
                 && moves_searched >= LMR_FIRST_REDUCED_MOVE
-                && next_move.score < FIRST_CAPTURE_SCORE
+                && quiet
                 && !in_check_here
-                && !in_check(&pos, !is_white_turn);
+                && !gives_check;
 
             let mut score = if reduce {
                 -search_node(
@@ -385,7 +455,9 @@ fn search_node(
             // are already ordered by MVV-LVA, and a killer slot spent on one is
             // a slot not spent on the quiet move that needed the help.
             if next_move.score < KILLER_BONUS {
-                history.store_killer(ply, move_key(parent_occupancy, &pos, is_white_turn));
+                let key = move_key(parent_occupancy, &pos, is_white_turn);
+                history.store_killer(ply, key);
+                history.credit_history(key, depth);
             }
             cutoff = true;
             break 'legal_moves; // Beta cutoff.
@@ -537,6 +609,18 @@ pub fn quiescence_search_best_move(
     } else {
         cb.get_black_occupancy()
     };
+    // Delta pruning: if even winning a queen from here would leave the score
+    // well short of alpha, this position is lost regardless of what is captured
+    // and searching the captures cannot change that. Switched off in check,
+    // where the replies may be forced, and near mate scores, where material is
+    // not what decides the position.
+    if !in_check(cb, is_white_turn)
+        && alpha < MATE_SCORE_THRESHOLD
+        && stand_pat + QUEEN_VALUE + DELTA_MARGIN < alpha
+    {
+        return (best_score, best_board);
+    }
+
     let capture_moves: Vec<_> = all_moves
         .into_iter()
         .filter(|m| m.score >= 6)
@@ -703,6 +787,20 @@ fn move_key(parent_occupancy: u64, child: &Chessboard, is_white_turn: bool) -> u
     parent_occupancy ^ child_occupancy
 }
 
+/// The two squares a move key encodes, or `None` if it is not a simple move.
+///
+/// A key is the mover's occupancy before XOR after, so a normal move sets
+/// exactly two bits: the square left and the square arrived on. Castling sets
+/// four and is not tracked.
+fn squares_of(key: u64) -> Option<(usize, usize)> {
+    if key.count_ones() != 2 {
+        return None;
+    }
+    let first = key.trailing_zeros() as usize;
+    let second = (key & (key - 1)).trailing_zeros() as usize;
+    Some((first, second))
+}
+
 /// Ordering bonus for a killer move: above every quiet move, below every
 /// capture, so MVV-LVA still leads.
 const KILLER_BONUS: u32 = 9;
@@ -721,6 +819,23 @@ const LMR_FIRST_REDUCED_MOVE: usize = 4;
 
 /// Below this depth there is nothing worth saving by reducing.
 const LMR_MIN_DEPTH: u32 = 3;
+
+/// How much a position that is in check is worth searching beyond the nominal
+/// depth. Forcing sequences are cheap -- few legal replies -- and stopping in
+/// the middle of one is how an engine walks into a mate it could have seen.
+const CHECK_EXTENSION: u32 = 1;
+
+/// Futility pruning: near the leaves, a quiet move in a position already this
+/// far below alpha is unlikely to claw its way back, so it is skipped. The
+/// margin grows with the depth still to search.
+const FUTILITY_MARGIN_PER_PLY: i32 = 120;
+const FUTILITY_MAX_DEPTH: u32 = 3;
+
+/// Delta pruning: in quiescence, a capture that cannot bring the score near
+/// alpha even after winning the piece is not worth searching.
+const DELTA_MARGIN: i32 = 200;
+/// Value of the most valuable piece that can be captured, for delta pruning.
+const QUEEN_VALUE: i32 = 900;
 
 /// How much shallower the null-move verification search runs. Two plies is the
 /// usual choice: deep enough to be meaningful, shallow enough to be cheap.

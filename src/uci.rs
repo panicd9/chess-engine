@@ -6,7 +6,7 @@
 //! [`search::STOP`] and let the worker unwind.
 
 use std::io::{self, BufRead, Write};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -15,6 +15,11 @@ use crate::chessboard::{Chessboard, Color};
 use crate::move_gen::legal_moves;
 use crate::notation::{describe_move, parse_move};
 use crate::search::{self, History, nega_max_alpha_beta_best_move};
+
+/// Set when `ponderhit` arrives: the opponent played the move we predicted, so
+/// the ponder search converts into a normal timed one, keeping everything it
+/// has already computed.
+static PONDER_HIT: AtomicBool = AtomicBool::new(false);
 
 const NAME: &str = concat!("chess-engine ", env!("CARGO_PKG_VERSION"));
 const AUTHOR: &str = "Darko Panic";
@@ -99,6 +104,9 @@ struct Limits {
     binc: u64,
     movestogo: Option<u64>,
     infinite: bool,
+    /// Thinking on the opponent's clock. No move may be reported until
+    /// `ponderhit` or `stop` arrives.
+    ponder: bool,
 }
 
 impl Limits {
@@ -188,12 +196,16 @@ pub fn run() -> io::Result<()> {
             }
             "go" => {
                 stop_search(&mut worker);
+                PONDER_HIT.store(false, Ordering::Relaxed);
                 let limits = parse_go(&line);
                 let history = history.clone();
                 let options = options;
                 worker =
                     Some(thread::spawn(move || search_and_report(board, limits, history, options)));
             }
+            // The opponent played the move we predicted. The worker is already
+            // searching the right position; it just starts its clock.
+            "ponderhit" => PONDER_HIT.store(true, Ordering::Relaxed),
             "stop" => stop_search(&mut worker),
             "quit" => {
                 stop_search(&mut worker);
@@ -225,19 +237,57 @@ fn stop_search(worker: &mut Option<thread::JoinHandle<()>>) {
 fn search_and_report(board: Chessboard, limits: Limits, mut history: History, options: Options) {
     let started = Instant::now();
     let budget = limits.budget(board.side_to_move, options.move_overhead);
-    let deadline = budget.map(|b| started + b);
+
+    // While pondering the clock has not started: we are searching on the
+    // opponent's time. There is no deadline until `ponderhit` arrives, at which
+    // point the budget begins from that moment and everything computed so far
+    // is kept. The watchdog below therefore waits for the hit before it starts
+    // counting, and a ponder search that is never hit simply runs until `stop`.
+    let deadline = if limits.ponder {
+        None
+    } else {
+        budget.map(|b| started + b)
+    };
 
     // A watchdog stops the search when the budget runs out. It is woken early
     // when the search finishes on its own, so it never outlives the search.
     let (done_tx, done_rx) = mpsc::channel::<()>();
-    let watchdog = deadline.map(|deadline| {
-        thread::spawn(move || {
-            let wait = deadline.saturating_duration_since(Instant::now());
-            if done_rx.recv_timeout(wait) == Err(RecvTimeoutError::Timeout) {
-                search::STOP.store(true, Ordering::Relaxed);
-            }
+    let pondering = limits.ponder;
+    let watchdog = if pondering {
+        // Pondering: no deadline until the opponent plays our predicted move.
+        // Poll for the hit, then enforce the budget from that moment.
+        budget.map(|budget| {
+            thread::spawn(move || {
+                loop {
+                    if search::STOP.load(Ordering::Relaxed) {
+                        return; // `stop` arrived: the search ends on its own.
+                    }
+                    if PONDER_HIT.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match done_rx.recv_timeout(Duration::from_millis(2)) {
+                        Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+                }
+                // The clock starts now.
+                let deadline = Instant::now() + budget;
+                let wait = deadline.saturating_duration_since(Instant::now());
+                if done_rx.recv_timeout(wait) == Err(RecvTimeoutError::Timeout) {
+                    search::STOP.store(true, Ordering::Relaxed);
+                }
+            })
         })
-    });
+    } else {
+        deadline.map(|deadline| {
+            thread::spawn(move || {
+                let wait = deadline.saturating_duration_since(Instant::now());
+                if done_rx.recv_timeout(wait) == Err(RecvTimeoutError::Timeout) {
+                    search::STOP.store(true, Ordering::Relaxed);
+                }
+            })
+        })
+    };
 
     let is_white = board.side_to_move == Color::White;
     let max_depth = limits.depth.unwrap_or(MAX_DEPTH);
@@ -246,15 +296,40 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History, op
 
     let mut best: Option<Chessboard> = None;
 
+    // Aspiration windows: the score at depth N is usually close to the score at
+    // N-1, so search a narrow band around it rather than the full range. A
+    // narrow window prunes far more. When the true score falls outside it the
+    // search reports a bound instead of a value, and has to be redone wider --
+    // so the window is widened on each failure until it holds.
+    const ASPIRATION_INITIAL: i32 = 40;
+    let mut previous: Option<i32> = None;
+
     for depth in 1..=max_depth {
-        let (score, position) = nega_max_alpha_beta_best_move(
-            &board,
-            depth,
-            is_white,
-            i32::MIN + 1,
-            i32::MAX - 1,
-            &mut history,
-        );
+        let (mut alpha, mut beta) = match previous {
+            // Below depth 4 the score is still moving too much to guess at.
+            Some(p) if depth >= 4 => (p - ASPIRATION_INITIAL, p + ASPIRATION_INITIAL),
+            _ => (i32::MIN + 1, i32::MAX - 1),
+        };
+
+        let (score, position) = loop {
+            let (score, position) =
+                nega_max_alpha_beta_best_move(&board, depth, is_white, alpha, beta, &mut history);
+
+            if search::STOP.load(Ordering::Relaxed) {
+                break (score, position);
+            }
+            // Outside the window: widen on the side that failed and search
+            // again. Widening to the full range at once is simplest and costs
+            // little, since failures are uncommon.
+            if score <= alpha {
+                alpha = i32::MIN + 1;
+            } else if score >= beta {
+                beta = i32::MAX - 1;
+            } else {
+                break (score, position);
+            }
+        };
+        previous = Some(score);
 
         if search::STOP.load(Ordering::Relaxed) {
             break; // Result is from an abandoned tree; keep the previous depth.
@@ -281,6 +356,16 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History, op
             if remaining < elapsed / 2 {
                 break;
             }
+        }
+    }
+
+    // A ponder search must not answer until the GUI asks: `ponderhit` means
+    // play it, `stop` means the prediction was wrong and the move is discarded
+    // anyway. Reporting early is what made the engine appear to move instantly
+    // and then ignore the rest of the protocol.
+    if pondering {
+        while !PONDER_HIT.load(Ordering::Relaxed) && !search::STOP.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -387,6 +472,7 @@ fn parse_go(line: &str) -> Limits {
             "binc" => limits.binc = words.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "movestogo" => limits.movestogo = words.next().and_then(|v| v.parse().ok()),
             "infinite" => limits.infinite = true,
+            "ponder" => limits.ponder = true,
             _ => {}
         }
     }
