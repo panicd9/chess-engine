@@ -137,6 +137,12 @@ thinking time by scheduler luck. Prefix the match with `taskset -c 4-11`
 (affinity is inherited by every child) and the spread drops to 1-2%. Eight is
 therefore the maximum homogeneous concurrency.
 
+A short principal variation means the table is too small, not that the walk is
+broken: `principal_variation` follows stored moves, and a position whose entry
+has been evicted ends the line. At depth 11 from a Ruy Lopez the PV is 2 plies
+at `Hash 8`, 11 plies at `Hash 64`. `examples/pvdiag` reports which of the three
+reasons stopped the walk.
+
 `examples/` holds the harnesses: `bench_all` (perft and fixed-depth search, with
 an allocation counter), `equiv` (nodes, score and best move over twelve
 positions — the check that a change is behaviour-preserving), `tune` (hash size
