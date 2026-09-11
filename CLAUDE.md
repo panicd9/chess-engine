@@ -22,8 +22,11 @@ engine is unusable in them.
 - `chessboard.rs` — `Chessboard` (the position), FEN parsing, and the `make_*`
   helpers that build a new board per move. Copy-make: every move produces a
   whole new 184-byte board.
-- `move_gen/` — one module per piece, each with `*_legal_moves`. Legality is
-  checked by making the move and testing `is_*_king_under_attack`.
+- `move_gen/` — one module per piece, each with `*_legal_moves_into(cb, &mut Vec<Move>)`
+  writing into a buffer the caller owns. Legality is checked by making the move
+  and testing `is_*_king_under_attack`. `move_gen.rs` also has
+  `*_captures_into`, the capture-only path quiescence uses, and
+  `has_any_legal_move`, which tells a quiet position from stalemate.
 - `move_gen/check_and_make_move.rs` — validates a move given from/to, for
   `Chessboard::make_move`. See "Known traps".
 - `search.rs` — negamax + alpha-beta + quiescence, killer ordering, repetition
@@ -54,6 +57,13 @@ asserts the invariant over a move tree — keep it passing.
 side to move; the search negates for black. Getting this wrong is silent and
 only shows up at odd depths.
 
+**The transposition table lives for the game.** The worker thread returns its
+`History` and `stop_search` takes it back, so the table survives from one `go`
+to the next — which is worth -25% nodes over a game. Two consequences: nothing
+may return a score from the table at ply 0 (that path has no move to report, and
+`bestmove` would fall through to whatever `legal_moves` yields first), and
+anything cached must be valid for the whole game, not just this search.
+
 **Search scores are relative to the side to move.** Mate scores are
 `i32::MIN + (MATE_BOUND - depth)`; `search::mate_in_plies` is the only place
 that decodes them. Do not reimplement that arithmetic elsewhere.
@@ -65,6 +75,20 @@ that decodes them. Do not reimplement that arithmetic elsewhere.
   capture-promotion returned a quiet promotion on the wrong square, and en
   passant answered any request that reached it. **If you touch a branch there,
   check it compares against the requested destination and tests legality.**
+- `*_captures_into` duplicates `*_legal_moves_into` with the target mask
+  narrowed to enemy occupancy, and the pawn capture generator duplicates the
+  capture, promotion and en passant branches of the full pawn generator. This is
+  the same hazard as `check_and_make_move.rs` above: when the two drift,
+  quiescence silently searches the wrong set of moves and perft cannot see it,
+  because perft never calls the capture path. **Whatever the full generator
+  produces that scores at or above the capture threshold, the capture generator
+  must produce too.** All four quiet promotions score 6-9 and qualify; castling
+  scores 3 and does not. A first cut dropped the quiet promotions and lost a
+  mate; `tests/regressions.rs` caught it.
+- Quiescence must not read an empty move list as mate or stalemate. With
+  captures only, empty means "nothing to capture". In check it generates
+  everything, so empty really is mate; otherwise `has_any_legal_move` settles
+  it. Getting this wrong scores a stalemate as the static evaluation.
 - `Chessboard` is `Copy` and cloned at every node, so its size is on the hot
   path. `ColoredPiece` must stay `#[repr(u8)]` — `repr(usize)` made
   `piece_square` 512 bytes and cost a third of move generation throughput.
@@ -101,3 +125,20 @@ Search changes must be measured, not argued. Save the current binary, make the
 change, then compare nodes-to-fixed-depth and run an A/B match with
 `cutechess-cli` (installed in `~/.local/bin`). Node counts and Elo do not scale
 together — a 47% node reduction bought +51 Elo.
+
+`.cargo/config.toml` pins `target-cpu=native`; without it the engine loses ~20%
+to BSF-plus-branch instead of TZCNT. Do not benchmark a build that bypassed it.
+
+**Pin the match to one class of core.** This machine is hybrid — cpu 0-3 are
+Zen5 at 5158 MHz, cpu 4-11 are Zen5c at 3289 MHz, and the identical search takes
+1736 ms on one and 2394 ms on the other. Unpinned, per-process times across eight
+concurrent searches spread 16-30%, which is one engine getting up to 38% more
+thinking time by scheduler luck. Prefix the match with `taskset -c 4-11`
+(affinity is inherited by every child) and the spread drops to 1-2%. Eight is
+therefore the maximum homogeneous concurrency.
+
+`examples/` holds the harnesses: `bench_all` (perft and fixed-depth search, with
+an allocation counter), `equiv` (nodes, score and best move over twelve
+positions — the check that a change is behaviour-preserving), `tune` (hash size
+and depth sweeps) and `micro` (per-function timings: eval, zobrist, the
+king-attack test, one generation call).
