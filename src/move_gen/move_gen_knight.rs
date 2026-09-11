@@ -30,13 +30,12 @@ pub fn knight_attacks_from_single_knight_bitboard(knight: Bitboard) -> Bitboard 
     knight_attacks(square)
 }
 
-pub fn white_knights_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
+pub fn white_knights_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_knights = cb.white_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_white_occupancy();
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & targets;
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
@@ -51,16 +50,14 @@ pub fn white_knights_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_knights &= remaining_knights - 1; // Remove the least significant knight
     }
 
-    moves
 }
 
-pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(KNIGHTS_MOVES_CAPACITY);
+pub fn black_knights_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_knights = cb.black_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & !cb.get_black_occupancy();
+        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & targets;
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -76,5 +73,4 @@ pub fn black_knights_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_knights &= remaining_knights - 1; // Remove the least significant knight
     }
 
-    moves
 }

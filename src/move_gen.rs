@@ -1,13 +1,14 @@
 // use crate::chessboard::*;
 
-use move_gen_bishop::{black_bishops_legal_moves, white_bishops_legal_moves};
-use move_gen_king::{black_king_legal_moves, white_king_legal_moves};
-use move_gen_knight::{black_knights_legal_moves, white_knights_legal_moves};
-use move_gen_pawn::{black_pawns_legal_moves, white_pawns_legal_moves};
-use move_gen_queen::{black_queens_legal_moves, white_queens_legal_moves};
-use move_gen_rook::{black_rooks_legal_moves, white_rooks_legal_moves,};
+use move_gen_bishop::{black_bishops_legal_moves_into, white_bishops_legal_moves_into};
+use move_gen_king::{black_king_legal_moves_into, white_king_legal_moves_into};
+use move_gen_knight::{black_knights_legal_moves_into, white_knights_legal_moves_into};
+use move_gen_pawn::{black_pawns_legal_moves_into, white_pawns_legal_moves_into};
+use move_gen_queen::{black_queens_legal_moves_into, white_queens_legal_moves_into};
+use move_gen_rook::{black_rooks_legal_moves_into, white_rooks_legal_moves_into};
 
 use crate::{chessboard::{Chessboard, Color}, move_list::Move};
+use move_gen_king::king_attacks;
 
 pub mod move_gen_rook;
 pub mod move_gen_pawn;
@@ -49,6 +50,53 @@ pub mod check_and_make_move;
 //     forward_attack | backward_attack
 // }
 
+/// Does this side have a legal move at all?
+///
+/// Asked only at a quiescence leaf that produced no captures, to tell a quiet
+/// position from stalemate -- a stalemate is a draw whatever the evaluation
+/// says. The king is tried first because it is the cheapest set to build (a
+/// table lookup, no sliding attacks) and in almost every position it has
+/// somewhere legal to go, so the answer is usually one make-and-test. The full
+/// generator is only reached when the king is boxed in, which is also the only
+/// case where the answer might be "no".
+pub fn has_any_legal_move(cb: &Chessboard, is_white: bool) -> bool {
+    let (king, own) = if is_white {
+        (cb.white_king, cb.get_white_occupancy())
+    } else {
+        (cb.black_king, cb.get_black_occupancy())
+    };
+
+    let mut targets = king_attacks(king) & !own;
+    while targets != 0 {
+        let to = targets & targets.wrapping_neg();
+        let moved = if is_white {
+            cb.make_white_king_move(king, to)
+        } else {
+            cb.make_black_king_move(king, to)
+        };
+        let leaves_king_attacked = if is_white {
+            moved.chessboard.is_white_king_under_attack()
+        } else {
+            moved.chessboard.is_black_king_under_attack()
+        };
+        if !leaves_king_attacked {
+            return true;
+        }
+        targets &= targets - 1;
+    }
+
+    // The king cannot move. Castling needs an empty, unattacked square next to
+    // the king, so it would have been found above; everything else has to be
+    // generated.
+    let mut buf = Vec::with_capacity(32);
+    if is_white {
+        white_legal_moves_into(cb, &mut buf);
+    } else {
+        black_legal_moves_into(cb, &mut buf);
+    }
+    !buf.is_empty()
+}
+
 pub fn legal_moves(cb: &Chessboard) -> Vec<Move> {
     let side_to_move = cb.side_to_move;
     if side_to_move == Color::White {
@@ -59,27 +107,55 @@ pub fn legal_moves(cb: &Chessboard) -> Vec<Move> {
 }
 
 pub fn white_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut new_positions = Vec::with_capacity(50);
-
-    new_positions.append(&mut white_pawns_legal_moves(cb));
-    new_positions.append(&mut white_knights_legal_moves(cb));
-    new_positions.append(&mut white_bishops_legal_moves(cb));
-    new_positions.append(&mut white_rooks_legal_moves(cb));
-    new_positions.append(&mut white_queens_legal_moves(cb));
-    new_positions.append(&mut white_king_legal_moves(cb));
-
+    let mut new_positions = Vec::with_capacity(64);
+    white_legal_moves_into(cb, &mut new_positions);
     new_positions
 }
 
-pub fn black_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut new_positions = Vec::with_capacity(50);
+pub fn white_legal_moves_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    let targets = !cb.get_white_occupancy();
+    white_pawns_legal_moves_into(cb, out);
+    white_knights_legal_moves_into(cb, out, targets);
+    white_bishops_legal_moves_into(cb, out, targets);
+    white_rooks_legal_moves_into(cb, out, targets);
+    white_queens_legal_moves_into(cb, out, targets);
+    white_king_legal_moves_into(cb, out, targets);
+}
 
-    new_positions.append(&mut black_pawns_legal_moves(cb));
-    new_positions.append(&mut black_knights_legal_moves(cb));
-    new_positions.append(&mut black_bishops_legal_moves(cb));
-    new_positions.append(&mut black_rooks_legal_moves(cb));
-    new_positions.append(&mut black_queens_legal_moves(cb));
-    new_positions.append(&mut black_king_legal_moves(cb));
-    
+/// PROTOTYPE: captures only for the non-pawn pieces; pawns still generate
+/// everything, so this is a lower bound on what a real capture generator saves.
+pub fn white_captures_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    let targets = cb.get_black_occupancy();
+    move_gen_pawn::white_pawn_captures_into(cb, out);
+    white_knights_legal_moves_into(cb, out, targets);
+    white_bishops_legal_moves_into(cb, out, targets);
+    white_rooks_legal_moves_into(cb, out, targets);
+    white_queens_legal_moves_into(cb, out, targets);
+    white_king_legal_moves_into(cb, out, targets);
+}
+
+pub fn black_legal_moves(cb: &Chessboard) -> Vec<Move> {
+    let mut new_positions = Vec::with_capacity(64);
+    black_legal_moves_into(cb, &mut new_positions);
     new_positions
+}
+
+pub fn black_legal_moves_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    let targets = !cb.get_black_occupancy();
+    black_pawns_legal_moves_into(cb, out);
+    black_knights_legal_moves_into(cb, out, targets);
+    black_bishops_legal_moves_into(cb, out, targets);
+    black_rooks_legal_moves_into(cb, out, targets);
+    black_queens_legal_moves_into(cb, out, targets);
+    black_king_legal_moves_into(cb, out, targets);
+}
+
+pub fn black_captures_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    let targets = cb.get_white_occupancy();
+    move_gen_pawn::black_pawn_captures_into(cb, out);
+    black_knights_legal_moves_into(cb, out, targets);
+    black_bishops_legal_moves_into(cb, out, targets);
+    black_rooks_legal_moves_into(cb, out, targets);
+    black_queens_legal_moves_into(cb, out, targets);
+    black_king_legal_moves_into(cb, out, targets);
 }

@@ -17,3 +17,5 @@ harness = false
 
 [profile.release]
 debug = true
+lto = "fat"
+codegen-units = 1

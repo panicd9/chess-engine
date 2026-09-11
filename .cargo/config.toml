@@ -1,0 +1,27 @@
+# Pin the instruction set the engine is built for.
+#
+# The move generator leans on `trailing_zeros()`, `x & -x` and `x & (x-1)`
+# several times per generated move. On the default `x86-64` baseline those
+# become BSF plus a zero-check branch; with BMI1 they are single TZCNT / BLSI /
+# BLSR instructions. That is where most of the win is -- `x86-64-v2`
+# (popcnt, SSE4.2) measured no better than baseline, `x86-64-v3` measured -17%.
+#
+# `native` goes further and emits AVX-512 on this Zen 5 chip (2349 zmm
+# references against zero for v3), which helps the 64-entry folds in `eval` but
+# hurts the 184-byte board copies. Order-balanced, 10 samples each, median:
+#
+#                       x86-64-v3   native
+#   perft 5               113 ms    126 ms   (+11.5%, native worse)
+#   search depth 10       234 ms    210 ms   (-10.4%, native better)
+#
+# Search is what the engine actually does -- perft is a correctness oracle with
+# no eval, no table and no quiescence -- so `native` wins on the metric that
+# matters. This is safe because the Lichess binary is a frozen copy taken from
+# this machine's build. If a binary ever has to run elsewhere, change this to
+# `x86-64-v3`: portable to any Haswell-or-later Intel and Zen-or-later AMD, and
+# still worth most of the gain. A `native` binary dies with SIGILL on an older
+# machine.
+#
+# LTO and codegen-units live in Cargo.toml, where profile settings belong.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]

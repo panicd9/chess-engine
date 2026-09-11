@@ -67,14 +67,13 @@ pub fn all_rooks_attacks(occupancy: Bitboard, rooks: Bitboard) -> Bitboard {
     total_attacks
 }
 
-pub fn white_rooks_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
+pub fn white_rooks_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_rooks = cb.white_rooks;
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
         let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & !cb.get_white_occupancy();
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & targets;
         
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -90,17 +89,15 @@ pub fn white_rooks_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_rooks &= remaining_rooks - 1; // Remove the least significant rook
     }
 
-    moves
 }
 
-pub fn black_rooks_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(ROOKS_MOVES_CAPACITY);
+pub fn black_rooks_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_rooks = cb.black_rooks;
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
         let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & !cb.get_black_occupancy();
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & targets;
         
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -115,7 +112,6 @@ pub fn black_rooks_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_rooks &= remaining_rooks - 1; // Remove the least significant rook
     }
 
-    moves
 }
 
 

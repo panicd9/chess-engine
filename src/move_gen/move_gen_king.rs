@@ -30,13 +30,12 @@ pub fn king_attacks(king: SingletonBitboard) -> Bitboard {
     king_attacks_from_square(square)
 }
 
-pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(KING_MOVES_CAPACITY);
+pub fn white_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let king = cb.white_king;
     let occupancy = cb.get_occupancy();
 
     // Normal king moves
-    let attacks = king_attacks(king) & !cb.get_white_occupancy();
+    let attacks = king_attacks(king) & targets;
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
@@ -75,16 +74,14 @@ pub fn white_king_legal_moves(cb: &Chessboard) -> Vec<Move> {
         }
     }
 
-    moves
 }
 
-pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(KING_MOVES_CAPACITY);
+pub fn black_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let king = cb.black_king;
     let occupancy = cb.get_occupancy();
 
     // Normal king moves
-    let attacks = king_attacks(king) & !cb.get_black_occupancy();
+    let attacks = king_attacks(king) & targets;
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
@@ -123,5 +120,4 @@ pub fn black_king_legal_moves(cb: &Chessboard) -> Vec<Move> {
         }
     }
 
-    moves
 }

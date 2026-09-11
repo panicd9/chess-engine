@@ -28,6 +28,11 @@ impl MoveList {
         }
     }
 
+    /// Hand the backing buffer back so it can be reused.
+    pub fn into_inner(self) -> Vec<Move> {
+        self.moves
+    }
+
     /// Returns the next best move (Chessboard) from the unsorted tail of the list.
     /// This method performs a lazy selection: it searches for the best move among
     /// boards[next_index..], swaps it to the front of that segment, increments next_index,

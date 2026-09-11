@@ -48,14 +48,13 @@ pub fn all_queens_attacks(occupancy: u64, queens: u64) -> u64 {
     combined_attacks
 }
 
-pub fn white_queens_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
+pub fn white_queens_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_queens = cb.white_queens;
 
     while remaining_queens != 0 {
         let single_queen_bitboard = remaining_queens & remaining_queens.wrapping_neg(); // Extract LSB
         let occupancy = cb.get_occupancy();
-        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & !cb.get_white_occupancy();
+        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & targets;
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -70,17 +69,15 @@ pub fn white_queens_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_queens &= remaining_queens - 1; // Remove LSB
     }
 
-    moves
 }
 
-pub fn black_queens_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(QUEEN_MOVES_CAPACITY);
+pub fn black_queens_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_queens = cb.black_queens;
 
     while remaining_queens != 0 {
         let single_queen_bitboard = remaining_queens & remaining_queens.wrapping_neg(); // Extract LSB
         let occupancy = cb.get_occupancy();
-        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & !cb.get_black_occupancy();
+        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & targets;
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -95,5 +92,4 @@ pub fn black_queens_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_queens &= remaining_queens - 1; // Remove LSB
     }
 
-    moves
 }

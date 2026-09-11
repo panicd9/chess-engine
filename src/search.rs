@@ -103,6 +103,7 @@ impl History {
         }
     }
 
+
     /// Remember a quiet move that caused a cutoff at this ply.
     fn store_killer(&mut self, ply: usize, key: u64) {
         if ply >= MAX_PLY || key == 0 {
@@ -212,6 +213,22 @@ fn count_node_and_should_stop() -> bool {
     STOP.load(Ordering::Relaxed)
 }
 
+/// PROTOTYPE: reuse move buffers instead of allocating one per node.
+mod pool {
+    use crate::move_list::Move;
+    use std::cell::RefCell;
+    thread_local! {
+        static POOL: RefCell<Vec<Vec<Move>>> = const { RefCell::new(Vec::new()) };
+    }
+    pub fn take() -> Vec<Move> {
+        POOL.with(|p| p.borrow_mut().pop()).unwrap_or_else(|| Vec::with_capacity(64))
+    }
+    pub fn give(mut v: Vec<Move>) {
+        v.clear();
+        POOL.with(|p| p.borrow_mut().push(v));
+    }
+}
+
 pub fn nega_max_alpha_beta_best_move(
     cb: &Chessboard,
     depth: u32,
@@ -297,13 +314,16 @@ fn search_node(
 
     // Generate the legal moves for the current side.
     // (Assuming that white_legal_moves/black_legal_moves returns an iterator or slice.)
-    let mut legal_moves = if is_white_turn {
-        MoveList::new(white_legal_moves(cb))
+    let mut buf = pool::take();
+    if is_white_turn {
+        crate::move_gen::white_legal_moves_into(cb, &mut buf);
     } else {
-        MoveList::new(black_legal_moves(cb))
-    };
+        crate::move_gen::black_legal_moves_into(cb, &mut buf);
+    }
+    let mut legal_moves = MoveList::new(buf);
 
     if legal_moves.moves.is_empty() {
+        pool::give(legal_moves.into_inner());
         return (terminal_score(cb, is_white_turn, depth), *cb);
     }
 
@@ -493,6 +513,7 @@ fn search_node(
 
     // Propagate upwards: our caller's score depends on ours.
     history.path_dependent |= outer_path_dependent;
+    pool::give(legal_moves.into_inner());
 
     (best_score, best_pos)
 }
@@ -591,14 +612,26 @@ pub fn quiescence_search_best_move(
         alpha = best_score;
     }
 
-    let all_moves = if is_white_turn {
-        white_legal_moves(cb)
-    } else {
-        black_legal_moves(cb)
-    };
+    let mut all_moves = pool::take();
+    let checked = in_check(cb, is_white_turn);
+    match (checked, is_white_turn) {
+        (true, true) => crate::move_gen::white_legal_moves_into(cb, &mut all_moves),
+        (true, false) => crate::move_gen::black_legal_moves_into(cb, &mut all_moves),
+        (false, true) => crate::move_gen::white_captures_into(cb, &mut all_moves),
+        (false, false) => crate::move_gen::black_captures_into(cb, &mut all_moves),
+    }
 
     if all_moves.is_empty() {
-        return (terminal_score(cb, is_white_turn, depth), best_board);
+        pool::give(all_moves);
+        // In check everything was generated, so an empty list is mate.
+        // Otherwise it only means there was nothing to capture -- which is what
+        // a quiet position looks like, and also what stalemate looks like. The
+        // two score differently (stalemate is a draw however the evaluation
+        // reads), so they have to be told apart.
+        if checked || !crate::move_gen::has_any_legal_move(cb, is_white_turn) {
+            return (terminal_score(cb, is_white_turn, depth), best_board);
+        }
+        return (best_score, best_board);
     }
 
     // Generate only "noisy" moves (e.g., captures).
@@ -618,24 +651,24 @@ pub fn quiescence_search_best_move(
     // where the replies may be forced, and near mate scores, where material is
     // not what decides the position.
     if toggles::on(&toggles::DELTA)
-        && !in_check(cb, is_white_turn)
+        && !checked
         && alpha < MATE_SCORE_THRESHOLD
         && stand_pat + QUEEN_VALUE + DELTA_MARGIN < alpha
     {
+        pool::give(all_moves);
         return (best_score, best_board);
     }
 
-    let capture_moves: Vec<_> = all_moves
-        .into_iter()
-        .filter(|m| m.score >= 6)
-        .filter(|m| !loses_material(cb, parent_occupancy, &m.chessboard, is_white_turn))
-        .collect();
+    all_moves.retain(|m| {
+        m.score >= 6 && !loses_material(cb, parent_occupancy, &m.chessboard, is_white_turn)
+    });
 
-    if capture_moves.is_empty() {
+    if all_moves.is_empty() {
+        pool::give(all_moves);
         return (best_score, best_board);
     }
 
-    let mut not_quiet_moves = MoveList::new(capture_moves);
+    let mut not_quiet_moves = MoveList::new(all_moves);
 
     // Loop through each capture move.
     while let Some(next_move) = not_quiet_moves.next_move() {
@@ -658,6 +691,7 @@ pub fn quiescence_search_best_move(
         // Beta cutoff: return immediately with the move that produced this
         // cutoff. Fail-soft, for the reason given above.
         if score >= beta {
+            pool::give(not_quiet_moves.into_inner());
             return (score, next_move.chessboard);
         }
 
@@ -669,6 +703,7 @@ pub fn quiescence_search_best_move(
         }
     }
 
+    pool::give(not_quiet_moves.into_inner());
     (best_score, best_board)
 }
 

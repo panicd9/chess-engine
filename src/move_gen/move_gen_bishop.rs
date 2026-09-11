@@ -56,14 +56,13 @@ pub fn all_bishops_attacks(occupancy: u64, bishops: u64) -> u64 {
     diagonal_attacks
 }
 
-pub fn white_bishops_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(BISHOPS_MOVES_CAPACITY);
+pub fn white_bishops_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_bishops = cb.white_bishops;
 
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
         let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & !cb.get_white_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & targets;
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -78,17 +77,15 @@ pub fn white_bishops_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_bishops &= remaining_bishops - 1; // Remove the least significant bishop
     }
 
-    moves
 }
 
-pub fn black_bishops_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(BISHOPS_MOVES_CAPACITY);
+pub fn black_bishops_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
     let mut remaining_bishops = cb.black_bishops;
 
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
         let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & !cb.get_black_occupancy();
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & targets;
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
@@ -103,5 +100,4 @@ pub fn black_bishops_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_bishops &= remaining_bishops - 1; // Remove the least significant bishop
     }
 
-    moves
 }

@@ -60,8 +60,7 @@ pub fn single_black_pawn_attacks(pawn: SingletonBitboard) -> Bitboard {
     BLACK_PAWN_ATTACKS[pawn.trailing_zeros() as usize]
 }
 
-pub fn white_pawns_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(PAWNS_MOVES_CAPACITY);
+pub fn white_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>) {
 
     let en_passant_square = cb.get_en_passant_bitboard();
     let occupancy = cb.get_occupancy();
@@ -142,11 +141,9 @@ pub fn white_pawns_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_pawns &= remaining_pawns - 1;
         // println!("remaining pawns: {}", remaining_pawns);
     }
-    moves
 }
 
-pub fn black_pawns_legal_moves(cb: &Chessboard) -> Vec<Move> {
-    let mut moves = Vec::with_capacity(PAWNS_MOVES_CAPACITY);
+pub fn black_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>) {
 
     let en_passant_square = cb.get_en_passant_bitboard();
     let occupancy = cb.get_occupancy();
@@ -227,5 +224,115 @@ pub fn black_pawns_legal_moves(cb: &Chessboard) -> Vec<Move> {
         remaining_pawns &= remaining_pawns - 1;
     }
 
-    moves
+}
+
+/// PROTOTYPE: the pawn moves quiescence keeps -- captures, capture-promotions
+/// and en passant. Quiet pushes (including quiet promotions) score below the
+/// capture threshold and are discarded, so they are never generated.
+pub fn white_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
+    let en_passant_square = cb.get_en_passant_bitboard();
+    let black_occupancy = cb.get_black_occupancy();
+    let occupancy = cb.get_occupancy();
+
+    let mut remaining_pawns = cb.white_pawns;
+    while remaining_pawns != 0 {
+        let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+        let square = single_pawn.trailing_zeros() as usize;
+
+        // A promotion push is quiet but decisive, and all four pieces score at
+        // or above the capture threshold, so the old filter kept them.
+        if single_pawn & RANK_7 != 0 {
+            let forward = WHITE_PAWN_FORWARD_MOVES[square] & !occupancy;
+            if forward != 0 {
+                for new_move in cb.make_all_white_pawn_promotion_moves(single_pawn, forward) {
+                    if !new_move.chessboard.is_white_king_under_attack() {
+                        moves.push(new_move);
+                    }
+                }
+            }
+        }
+
+        let mut remaining_attacks = WHITE_PAWN_ATTACKS[square] & black_occupancy;
+        while remaining_attacks != 0 {
+            let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
+            if single_attack & RANK_8 == 0 {
+                let new_move = cb.make_white_pawn_capture_move(single_pawn, single_attack);
+                if !new_move.chessboard.is_white_king_under_attack() {
+                    moves.push(new_move);
+                }
+            } else {
+                for new_move in cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack) {
+                    if !new_move.chessboard.is_white_king_under_attack() {
+                        moves.push(new_move);
+                    }
+                }
+            }
+            remaining_attacks &= remaining_attacks - 1;
+        }
+
+        if en_passant_square != 0 {
+            let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[square];
+            if en_passant_mask != 0 {
+                let new_move = cb.make_white_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                if !new_move.chessboard.is_white_king_under_attack() {
+                    moves.push(new_move);
+                }
+            }
+        }
+
+        remaining_pawns &= remaining_pawns - 1;
+    }
+}
+
+pub fn black_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
+    let en_passant_square = cb.get_en_passant_bitboard();
+    let white_occupancy = cb.get_white_occupancy();
+    let occupancy = cb.get_occupancy();
+
+    let mut remaining_pawns = cb.black_pawns;
+    while remaining_pawns != 0 {
+        let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+        let square = single_pawn.trailing_zeros() as usize;
+
+        if single_pawn & RANK_2 != 0 {
+            let forward = BLACK_PAWN_FORWARD_MOVES[square] & !occupancy;
+            if forward != 0 {
+                for new_move in cb.make_all_black_pawn_promotion_moves(single_pawn, forward) {
+                    if !new_move.chessboard.is_black_king_under_attack() {
+                        moves.push(new_move);
+                    }
+                }
+            }
+        }
+
+        let mut remaining_attacks = BLACK_PAWN_ATTACKS[square] & white_occupancy;
+        while remaining_attacks != 0 {
+            let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
+            if single_attack & RANK_1 == 0 {
+                let new_move = cb.make_black_pawn_capture_move(single_pawn, single_attack);
+                if !new_move.chessboard.is_black_king_under_attack() {
+                    moves.push(new_move);
+                }
+            } else {
+                for new_move in cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack) {
+                    if !new_move.chessboard.is_black_king_under_attack() {
+                        moves.push(new_move);
+                    }
+                }
+            }
+            remaining_attacks &= remaining_attacks - 1;
+        }
+
+        if en_passant_square != 0 {
+            let en_passant_mask = en_passant_square & BLACK_PAWN_ATTACKS[square];
+            if en_passant_mask != 0 {
+                let new_move = cb.make_black_pawn_en_passant_capture(single_pawn, en_passant_mask);
+                if !new_move.chessboard.is_black_king_under_attack() {
+                    moves.push(new_move);
+                }
+            }
+        }
+
+        remaining_pawns &= remaining_pawns - 1;
+    }
 }
