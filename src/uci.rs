@@ -153,7 +153,9 @@ pub fn run() -> io::Result<()> {
     let mut board = Chessboard::new_initial_board();
     let mut history = History::new();
     let mut options = Options::default();
-    let mut worker: Option<thread::JoinHandle<()>> = None;
+    // The worker hands the `History` back when it finishes, so the table it
+    // built outlives the search that built it. See `History::adopt_game`.
+    let mut worker: Option<thread::JoinHandle<History>> = None;
 
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
@@ -190,38 +192,51 @@ pub fn run() -> io::Result<()> {
                 }
                 println!("uciok");
             }
-            "setoption" => options.apply(&line),
+            "setoption" => {
+                let previous = options.table_megabytes;
+                options.apply(&line);
+                // The table now lives across moves, so a size change has to be
+                // acted on here; nothing else will notice.
+                if options.table_megabytes != previous {
+                    stop_search(&mut worker, &mut history);
+                    history.resize_table(options.table_megabytes);
+                }
+            }
             "isready" => println!("readyok"),
             "ucinewgame" => {
-                stop_search(&mut worker);
+                stop_search(&mut worker, &mut history);
                 board = Chessboard::new_initial_board();
-                history = History::new();
+                history.new_game();
             }
             "position" => {
-                stop_search(&mut worker);
+                stop_search(&mut worker, &mut history);
                 match parse_position(&line) {
                     Ok((parsed, played)) => {
                         board = parsed;
-                        history = played;
+                        history.adopt_game(played);
                     }
                     Err(err) => eprintln!("info string bad position: {err}"),
                 }
             }
             "go" => {
-                stop_search(&mut worker);
+                stop_search(&mut worker, &mut history);
                 PONDER_HIT.store(false, Ordering::Relaxed);
                 let limits = parse_go(&line);
-                let history = history.clone();
+                // Lend the search everything we have, including the table, and
+                // take it back when it finishes. Every command that reads
+                // `history` calls `stop_search` first, so the placeholder left
+                // behind here is never seen.
+                let lent = std::mem::replace(&mut history, History::new());
                 let options = options;
                 worker =
-                    Some(thread::spawn(move || search_and_report(board, limits, history, options)));
+                    Some(thread::spawn(move || search_and_report(board, limits, lent, options)));
             }
             // The opponent played the move we predicted. The worker is already
             // searching the right position; it just starts its clock.
             "ponderhit" => PONDER_HIT.store(true, Ordering::Relaxed),
-            "stop" => stop_search(&mut worker),
+            "stop" => stop_search(&mut worker, &mut history),
             "quit" => {
-                stop_search(&mut worker);
+                stop_search(&mut worker, &mut history);
                 return Ok(());
             }
             // Unknown commands are ignored, as the protocol requires.
@@ -230,16 +245,20 @@ pub fn run() -> io::Result<()> {
         io::stdout().flush()?;
     }
 
-    stop_search(&mut worker);
+    stop_search(&mut worker, &mut history);
     Ok(())
 }
 
 /// Ask any running search to finish, wait for it, and clear the flag ready for
 /// the next one.
-fn stop_search(worker: &mut Option<thread::JoinHandle<()>>) {
+fn stop_search(worker: &mut Option<thread::JoinHandle<History>>, history: &mut History) {
     search::STOP.store(true, Ordering::Relaxed);
     if let Some(handle) = worker.take() {
-        let _ = handle.join();
+        // Take the table back. If the worker panicked there is nothing to
+        // recover and the next search builds a fresh one.
+        if let Ok(returned) = handle.join() {
+            *history = returned;
+        }
     }
     search::STOP.store(false, Ordering::Relaxed);
 }
@@ -247,7 +266,12 @@ fn stop_search(worker: &mut Option<thread::JoinHandle<()>>) {
 /// Iterative deepening. Each completed depth replaces the move to play; a depth
 /// cut short by the clock is thrown away, because its score came from a
 /// half-searched tree.
-fn search_and_report(board: Chessboard, limits: Limits, mut history: History, options: Options) {
+fn search_and_report(
+    board: Chessboard,
+    limits: Limits,
+    mut history: History,
+    options: Options,
+) -> History {
     let started = Instant::now();
     let budget = limits.budget(board.side_to_move, options.move_overhead);
 
@@ -400,6 +424,7 @@ fn search_and_report(board: Chessboard, limits: Limits, mut history: History, op
         None => println!("bestmove 0000"),
     }
     let _ = io::stdout().flush();
+    history
 }
 
 fn report_info(

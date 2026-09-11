@@ -103,6 +103,38 @@ impl History {
         }
     }
 
+    /// Throw the table away and build one of a different size. Only for a
+    /// `setoption name Hash`, which a GUI sends before the game starts.
+    pub fn resize_table(&mut self, megabytes: usize) {
+        self.table = TranspositionTable::new(megabytes);
+    }
+
+    /// Replace the moves played so far, keeping everything the search has
+    /// learned.
+    ///
+    /// `position` arrives before every `go`, and the only thing about it that
+    /// changes between moves is the list of positions played. The table, the
+    /// killers and the history scores belong to the session, and carrying them
+    /// across moves is most of what makes the next search cheap: after the
+    /// opponent replies, the position in front of us is one the last search
+    /// already examined, and its whole subtree is still in the table.
+    pub fn adopt_game(&mut self, played: History) {
+        self.keys = played.keys;
+    }
+
+    /// Forget the game and everything learned from it, but keep the table's
+    /// allocation -- sizing it again costs tens of milliseconds.
+    pub fn new_game(&mut self) {
+        self.keys.clear();
+        for slot in self.killers.iter_mut() {
+            *slot = [0; 2];
+        }
+        for row in self.history_scores.iter_mut() {
+            row.fill(0);
+        }
+        self.table.clear();
+        self.path_dependent = false;
+    }
 
     /// Remember a quiet move that caused a cutoff at this ply.
     fn store_killer(&mut self, ply: usize, key: u64) {
@@ -269,9 +301,17 @@ fn search_node(
     let mut tt_move: MoveKey = 0;
     if let Some(hit) = history.table.probe(key, depth, alpha, beta) {
         tt_move = hit.best_move;
-        if let Some(score) = hit.score {
-            if !is_mate_score(score) {
-                return (score, *cb);
+        // Never cut off at the root. This path returns the position unchanged
+        // because it has no move to report, which the caller at ply 0 needs --
+        // it would answer `bestmove` with whatever `legal_moves` happened to
+        // yield first. Latent while the table lasted only one search, because
+        // iterative deepening always probes the root deeper than it stored it;
+        // a table that outlives the search has a deep root entry waiting.
+        if ply > 0 {
+            if let Some(score) = hit.score {
+                if !is_mate_score(score) {
+                    return (score, *cb);
+                }
             }
         }
     }
