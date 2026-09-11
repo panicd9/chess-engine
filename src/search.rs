@@ -266,7 +266,8 @@ fn search_node(
     // Skipped at the root, because there we must return an actual move; when in
     // check, because passing would be illegal; and with only pawns left, where
     // the "having the move helps" assumption fails.
-    if ply > 0
+    if toggles::on(&toggles::NULL_MOVE)
+        && ply > 0
         && depth > NULL_MOVE_REDUCTION
         && beta < MATE_SCORE_THRESHOLD
         && has_pieces(cb, is_white_turn)
@@ -322,7 +323,7 @@ fn search_node(
             m.score = TT_MOVE_BONUS;
         } else if m.score < KILLER_BONUS && ply < MAX_PLY && history.is_killer(ply, key) {
             m.score = KILLER_BONUS;
-        } else if m.score < KILLER_BONUS {
+        } else if m.score < KILLER_BONUS && toggles::on(&toggles::HISTORY) {
             // Remaining quiet moves are ordered by how often they have caused a
             // cutoff elsewhere in this search. Capped below KILLER_BONUS so the
             // ordering above it is never disturbed.
@@ -347,7 +348,7 @@ fn search_node(
     // In check, search a ply deeper. Forcing sequences have few legal replies so
     // the extra ply is cheap, and stopping in the middle of one is how an engine
     // walks into a mate it was one move from seeing.
-    let depth = if in_check_here && ply > 0 {
+    let depth = if in_check_here && ply > 0 && toggles::on(&toggles::CHECK_EXTENSIONS) {
         depth + CHECK_EXTENSION
     } else {
         depth
@@ -356,7 +357,8 @@ fn search_node(
     // Futility pruning: close to the leaves and already far below alpha, a quiet
     // move is unlikely to recover. The margin grows with the remaining depth.
     // Never applied while in check, where any move may be forced.
-    let futile = !in_check_here
+    let futile = toggles::on(&toggles::FUTILITY)
+        && !in_check_here
         && depth <= FUTILITY_MAX_DEPTH
         && beta < MATE_SCORE_THRESHOLD
         && (if is_white_turn { evaluate(cb) } else { -evaluate(cb) })
@@ -402,7 +404,8 @@ fn search_node(
                 continue 'legal_moves;
             }
 
-            let reduce = depth >= LMR_MIN_DEPTH
+            let reduce = toggles::on(&toggles::LMR)
+                && depth >= LMR_MIN_DEPTH
                 && moves_searched >= LMR_FIRST_REDUCED_MOVE
                 && quiet
                 && !in_check_here
@@ -614,7 +617,8 @@ pub fn quiescence_search_best_move(
     // and searching the captures cannot change that. Switched off in check,
     // where the replies may be forced, and near mate scores, where material is
     // not what decides the position.
-    if !in_check(cb, is_white_turn)
+    if toggles::on(&toggles::DELTA)
+        && !in_check(cb, is_white_turn)
         && alpha < MATE_SCORE_THRESHOLD
         && stand_pat + QUEEN_VALUE + DELTA_MARGIN < alpha
     {
@@ -819,6 +823,43 @@ const LMR_FIRST_REDUCED_MOVE: usize = 4;
 
 /// Below this depth there is nothing worth saving by reducing.
 const LMR_MIN_DEPTH: u32 = 3;
+
+/// Switches for the individually-unproven search techniques, so each can be
+/// disabled at runtime and measured on its own. They were added and measured as
+/// one group (+35 +/- 40 Elo), which cannot tell whether any single one is
+/// actually harmful.
+///
+/// All default to on; the UCI options exist for A/B testing, not for play.
+pub mod toggles {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    pub static CHECK_EXTENSIONS: AtomicBool = AtomicBool::new(true);
+    pub static HISTORY: AtomicBool = AtomicBool::new(true);
+    pub static FUTILITY: AtomicBool = AtomicBool::new(true);
+    pub static DELTA: AtomicBool = AtomicBool::new(true);
+    pub static LMR: AtomicBool = AtomicBool::new(true);
+    pub static NULL_MOVE: AtomicBool = AtomicBool::new(true);
+
+    /// Set one by name. Returns whether the name was recognised.
+    pub fn set(name: &str, on: bool) -> bool {
+        let target = match name.to_ascii_lowercase().as_str() {
+            "checkextensions" => &CHECK_EXTENSIONS,
+            "history" => &HISTORY,
+            "futility" => &FUTILITY,
+            "delta" => &DELTA,
+            "lmr" => &LMR,
+            "nullmove" => &NULL_MOVE,
+            _ => return false,
+        };
+        target.store(on, Ordering::Relaxed);
+        true
+    }
+
+    #[inline]
+    pub fn on(flag: &AtomicBool) -> bool {
+        flag.load(Ordering::Relaxed)
+    }
+}
 
 /// How much a position that is in check is worth searching beyond the nominal
 /// depth. Forcing sequences are cheap -- few legal replies -- and stopping in

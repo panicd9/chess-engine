@@ -80,6 +80,14 @@ impl Options {
             }
             // Evaluation weights, exposed so they can be tuned by playing
             // matches with different values rather than rebuilding each time.
+            // Search technique switches, for A/B testing each in isolation.
+            other if crate::search::toggles::set(
+                other,
+                matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "on"),
+            ) && matches!(
+                value.to_ascii_lowercase().as_str(),
+                "true" | "false" | "1" | "0" | "on" | "off"
+            ) => {}
             other => {
                 if let Ok(v) = value.parse::<i32>() {
                     // `set` reports whether it recognised the name; anything
@@ -165,6 +173,11 @@ pub fn run() -> io::Result<()> {
                     "option name Move Overhead type spin default {DEFAULT_MOVE_OVERHEAD_MS} \
                      min 0 max 5000"
                 );
+                for name in [
+                    "CheckExtensions", "History", "Futility", "Delta", "LMR", "NullMove",
+                ] {
+                    println!("option name {name} type check default true");
+                }
                 for (name, default, min, max) in [
                     ("KnightMobility", 4, 0, 30),
                     ("BishopMobility", 4, 0, 30),
