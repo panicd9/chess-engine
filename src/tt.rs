@@ -121,6 +121,15 @@ impl TranspositionTable {
         }
         let slot = &mut self.entries[key as usize & self.mask];
         if slot.key == key && u32::from(slot.depth) > depth {
+            // Keep the deeper score -- it cost more and proves more -- but take
+            // the move anyway. A score that came from a repetition is stored at
+            // depth 0, so refusing outright freezes the move at whatever depth
+            // last managed a store: the root of a Ruy Lopez kept reporting its
+            // depth-6 move while the depth-11 search played something else, and
+            // every iteration in between ordered the root by the stale one.
+            if best_move != 0 {
+                slot.best_move = best_move;
+            }
             return;
         }
         *slot = Entry {
