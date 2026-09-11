@@ -9,19 +9,71 @@
 
 use crate::search::{Bound, MoveKey};
 
+/// A move as the table stores it, in 16 bits rather than a [`MoveKey`]'s 64.
+///
+/// A move key is the mover's occupancy before XOR after, so an ordinary move
+/// sets exactly two bits -- the square left and the square arrived on -- which
+/// pack into two six-bit indices. Castling moves the rook as well and so sets
+/// four; there are only four such keys, so they are enumerated above the twelve
+/// bits the ordinary case needs. Zero means "none", unambiguously, because an
+/// ordinary move's two squares are always different.
+///
+/// This is what gets `Entry` down to 16 bytes, which is a power of two: entries
+/// stop straddling cache lines, and `Hash n` can allocate exactly n megabytes.
+type PackedMove = u16;
+
+/// Set on a packed castling move. Ordinary moves never reach 0x1000.
+const CASTLE_TAG: u16 = 0xF000;
+
+/// The four castling move keys: king from and to, XOR rook from and to.
+const CASTLE_KEYS: [u64; 4] = [
+    (1 << 4) | (1 << 6) | (1 << 7) | (1 << 5),     // white kingside:  e1g1 h1f1
+    (1 << 4) | (1 << 2) | (1 << 0) | (1 << 3),     // white queenside: e1c1 a1d1
+    (1 << 60) | (1 << 62) | (1 << 63) | (1 << 61), // black kingside
+    (1 << 60) | (1 << 58) | (1 << 56) | (1 << 59), // black queenside
+];
+
+fn pack_move(key: MoveKey) -> PackedMove {
+    if key.count_ones() == 2 {
+        let first = key.trailing_zeros() as u16;
+        let second = (key & (key - 1)).trailing_zeros() as u16;
+        return first | (second << 6);
+    }
+    let mut i = 0;
+    while i < CASTLE_KEYS.len() {
+        if key == CASTLE_KEYS[i] {
+            return CASTLE_TAG | i as u16;
+        }
+        i += 1;
+    }
+    0 // Not a shape a move key can take; store nothing rather than a wrong move.
+}
+
+fn unpack_move(packed: PackedMove) -> MoveKey {
+    if packed == 0 {
+        return 0;
+    }
+    if (packed & CASTLE_TAG) == CASTLE_TAG {
+        return CASTLE_KEYS[(packed & 3) as usize];
+    }
+    (1u64 << (packed & 63)) | (1u64 << ((packed >> 6) & 63))
+}
+
+/// Sixteen bytes: an 8-byte key, a 4-byte score, a packed move, a depth and a
+/// bound. Keep it that way -- the size divides a cache line and a megabyte.
 #[derive(Clone, Copy)]
 struct Entry {
     key: u64,
-    /// The move that was best here, as a [`MoveKey`]. 0 means "none stored".
-    best_move: MoveKey,
     score: i32,
+    /// The move that was best here, packed. 0 means "none stored".
+    best_move: PackedMove,
     depth: u8,
     bound: Bound,
 }
 
 impl Default for Entry {
     fn default() -> Self {
-        Entry { key: 0, best_move: 0, score: 0, depth: 0, bound: Bound::Exact }
+        Entry { key: 0, score: 0, best_move: 0, depth: 0, bound: Bound::Exact }
     }
 }
 
@@ -47,7 +99,10 @@ impl TranspositionTable {
     /// of two. Zero gives a disabled table that never hits.
     pub fn new(megabytes: usize) -> Self {
         let wanted = megabytes * 1024 * 1024 / std::mem::size_of::<Entry>();
-        let len = if wanted < 2 { 0 } else { wanted.next_power_of_two() / 2 };
+        // The largest power of two that fits. `next_power_of_two() / 2` was
+        // wrong for a `wanted` that is already a power of two -- it halved it,
+        // so the table came out at half the size asked for.
+        let len = if wanted < 2 { 0 } else { 1usize << wanted.ilog2() };
         TranspositionTable {
             entries: vec![Entry::default(); len],
             mask: len.saturating_sub(1),
@@ -75,7 +130,7 @@ impl TranspositionTable {
         if entry.key != key || entry.best_move == 0 {
             return None;
         }
-        Some(entry.best_move)
+        Some(unpack_move(entry.best_move))
     }
 
     pub fn probe(&self, key: u64, depth: u32, alpha: i32, beta: i32) -> Option<Hit> {
@@ -101,7 +156,7 @@ impl TranspositionTable {
             None
         };
 
-        Some(Hit { best_move: entry.best_move, score })
+        Some(Hit { best_move: unpack_move(entry.best_move), score })
     }
 
     /// Depth-preferred replacement: a deeper result cost more to produce and is
@@ -119,6 +174,7 @@ impl TranspositionTable {
         if !self.is_enabled() {
             return;
         }
+        let packed = pack_move(best_move);
         let slot = &mut self.entries[key as usize & self.mask];
         if slot.key == key && u32::from(slot.depth) > depth {
             // Keep the deeper score -- it cost more and proves more -- but take
@@ -127,14 +183,14 @@ impl TranspositionTable {
             // last managed a store: the root of a Ruy Lopez kept reporting its
             // depth-6 move while the depth-11 search played something else, and
             // every iteration in between ordered the root by the stale one.
-            if best_move != 0 {
-                slot.best_move = best_move;
+            if packed != 0 {
+                slot.best_move = packed;
             }
             return;
         }
         *slot = Entry {
             key,
-            best_move,
+            best_move: packed,
             score,
             depth: depth.min(u8::MAX as u32) as u8,
             bound,
