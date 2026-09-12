@@ -339,6 +339,10 @@ fn search_and_report(
     history.ensure_table(options.table_megabytes);
 
     let mut best: Option<Chessboard> = None;
+    // The reply the last completed iteration expected, remembered as it was
+    // reported. Set together with `best`, so the two always come from the same
+    // iteration and the predicted reply answers the move actually played.
+    let mut predicted_reply: Option<String> = None;
 
     // Aspiration windows: the score at depth N is usually close to the score at
     // N-1, so search a narrow band around it rather than the full range. A
@@ -385,7 +389,7 @@ fn search_and_report(
             break;
         }
         best = Some(position);
-        report_info(&board, score, depth, started, &history);
+        predicted_reply = report_info(&board, score, depth, started, &history);
 
         // A forced mate is as good as it gets; searching deeper cannot improve it.
         if search::mate_in_plies(score).is_some() {
@@ -429,7 +433,9 @@ fn search_and_report(
         // will ever ponder: cutechess and python-chess both start a ponder
         // search only when the bestmove line carries one, so `option name
         // Ponder` alone buys nothing.
-        Some((position, mv)) => match ponder_move(&position, &history) {
+        Some((position, mv)) => match predicted_reply
+            .or_else(|| ponder_move(&position, &history))
+        {
             Some(reply) => println!("bestmove {mv} ponder {reply}"),
             None => println!("bestmove {mv}"),
         },
@@ -441,7 +447,16 @@ fn search_and_report(
     history
 }
 
-/// The reply we expect, for the `ponder` token of `bestmove`.
+/// The reply we expect, for the `ponder` token of `bestmove`. **Fallback only**
+/// -- the search remembers the reply from the PV of its last completed
+/// iteration, and this runs only when it has none to offer.
+///
+/// Asking the table at the end of the search is not reliable, because the entry
+/// for `after` can be evicted between the iteration that found it and the end of
+/// the search. Measured over one session that lost the token on 2 of 87 moves,
+/// and pondering is worth roughly a third of the engine's total thinking time,
+/// so each loss is expensive. The PV printed with the last `info` line already
+/// named the reply in both cases.
 ///
 /// `after` is the position the move being reported leads to, so the table's
 /// best move *there* is the opponent's expected reply. Asking from `after`
@@ -457,13 +472,20 @@ fn ponder_move(after: &Chessboard, history: &History) -> Option<String> {
     describe_move(after, line.first()?)
 }
 
+/// Prints one `info` line and returns the reply the PV expects -- the second
+/// move of the line just reported, which is the move to ponder on.
+///
+/// Handing it back rather than looking it up again at the end of the search is
+/// the point: the caller keeps it from the last *completed* iteration, while
+/// the entry it came from may be evicted before the search finishes. See
+/// `ponder_move`.
 fn report_info(
     root: &Chessboard,
     score: i32,
     depth: u32,
     started: Instant,
     history: &History,
-) {
+) -> Option<String> {
     let elapsed = started.elapsed();
     let millis = elapsed.as_millis().max(1) as u64;
     let nodes = search::nodes_searched();
@@ -483,13 +505,22 @@ fn report_info(
     // The whole line, not just the move: a GUI shows it as the engine's plan,
     // and pondering needs the opponent's expected reply from it.
     let mut pv = String::new();
+    let mut predicted = None;
     let mut from = *root;
-    for position in search::principal_variation(root, &history.table, depth as usize) {
+    for (ply, position) in search::principal_variation(root, &history.table, depth as usize)
+        .into_iter()
+        .enumerate()
+    {
         if let Some(mv) = describe_move(&from, &position) {
             if !pv.is_empty() {
                 pv.push(' ');
             }
             pv.push_str(&mv);
+            // Ply 0 is the move we are about to play, so ply 1 is the reply to
+            // it: what the opponent is expected to answer, and what to ponder.
+            if ply == 1 {
+                predicted = Some(mv);
+            }
         }
         from = position;
     }
@@ -498,6 +529,7 @@ fn report_info(
         "info depth {depth} score {score_text} nodes {nodes} nps {nps} time {millis} pv {pv}"
     );
     let _ = io::stdout().flush();
+    predicted
 }
 
 /// Parse a `position` command into the position and the history of everything

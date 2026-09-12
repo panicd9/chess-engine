@@ -287,3 +287,43 @@ fn ponderhit_starts_the_clock() {
         "took {elapsed:?} after ponderhit; the clock did not start"
     );
 }
+
+/// The `ponder` token must be the reply from the PV of the last completed
+/// iteration, not whatever the table holds once the search has finished.
+///
+/// The entry for the position after our move can be evicted between the
+/// iteration that found it and the end of the search, and asking the table
+/// then produced no token at all -- which costs the GUI a whole ponder search.
+#[test]
+fn ponder_token_is_the_pv_second_move() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    let (mv, lines) = engine.bestmove("position startpos", "go depth 8");
+
+    let last_info = lines
+        .iter()
+        .filter(|l| l.starts_with("info depth"))
+        .next_back()
+        .expect("no info lines");
+    let pv: Vec<&str> = last_info
+        .split(" pv ")
+        .nth(1)
+        .expect("info line has no pv")
+        .split_whitespace()
+        .collect();
+    assert!(pv.len() >= 2, "PV too short to predict a reply: {last_info}");
+
+    let best_line = lines.last().unwrap();
+    let fields: Vec<&str> = best_line.split_whitespace().collect();
+    assert_eq!(
+        fields.get(2),
+        Some(&"ponder"),
+        "bestmove carried no ponder token: {best_line}"
+    );
+    assert_eq!(mv, pv[0], "bestmove disagrees with the PV it just reported");
+    assert_eq!(
+        fields.get(3),
+        Some(&pv[1]),
+        "ponder token is not the PV's second move: {best_line} vs pv {pv:?}"
+    );
+}
