@@ -175,6 +175,13 @@ pub fn run() -> io::Result<()> {
                     "option name Move Overhead type spin default {DEFAULT_MOVE_OVERHEAD_MS} \
                      min 0 max 5000"
                 );
+                // Declared only so the GUI will send `go ponder`: cutechess sets
+                // its `m_canPonder` from the presence of this option and never
+                // offers a ponder search without it, so "Thinking on opponent's
+                // time" silently applied to the opponent alone. The value is
+                // ignored -- `go ponder` is what starts a ponder search, and
+                // python-chess (the lichess bot) sends it either way.
+                println!("option name Ponder type check default false");
                 for name in [
                     "CheckExtensions", "History", "Futility", "Delta", "LMR", "NullMove",
                 ] {
@@ -417,14 +424,37 @@ fn search_and_report(
         best = legal_moves(&board).first().map(|m| m.chessboard);
     }
 
-    match best.and_then(|position| describe_move(&board, &position)) {
-        Some(mv) => println!("bestmove {mv}"),
+    match best.and_then(|position| describe_move(&board, &position).map(|mv| (position, mv))) {
+        // The `ponder` token names the reply we expect, and without it no GUI
+        // will ever ponder: cutechess and python-chess both start a ponder
+        // search only when the bestmove line carries one, so `option name
+        // Ponder` alone buys nothing.
+        Some((position, mv)) => match ponder_move(&position, &history) {
+            Some(reply) => println!("bestmove {mv} ponder {reply}"),
+            None => println!("bestmove {mv}"),
+        },
         // No legal move: the game is over. UCI has no "resign", and GUIs accept
         // this null move as "nothing to play".
         None => println!("bestmove 0000"),
     }
     let _ = io::stdout().flush();
     history
+}
+
+/// The reply we expect, for the `ponder` token of `bestmove`.
+///
+/// `after` is the position the move being reported leads to, so the table's
+/// best move *there* is the opponent's expected reply. Asking from `after`
+/// rather than walking the root's stored line keeps the suggestion consistent
+/// with the move actually being played: a search aborted mid-iteration leaves a
+/// root entry naming a move the completed iteration did not choose, and
+/// dropping the token whenever the two disagreed cost a third of them.
+///
+/// `None` when nothing is stored for `after` -- an evicted entry, or a mate or
+/// stalemate, where there is no reply to expect.
+fn ponder_move(after: &Chessboard, history: &History) -> Option<String> {
+    let line = search::principal_variation(after, &history.table, 1);
+    describe_move(after, line.first()?)
 }
 
 fn report_info(
