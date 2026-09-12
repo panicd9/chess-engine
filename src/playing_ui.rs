@@ -220,7 +220,7 @@ fn engine_move_best_5_lines(cb: Chessboard, depth: u32) -> Vec<(f32, Vec<Chessbo
         false
     };
     let best_5_lines =
-        nega_max_alpha_beta_best_line(&cb, depth, is_white_turn, i32::MIN, i32::MAX);
+        nega_max_alpha_beta_best_line(&cb, depth, 0, is_white_turn, i32::MIN, i32::MAX);
 
     println!("\nEngine thinking...");
     // Map the lines and scores into the desired format with floating-point scores

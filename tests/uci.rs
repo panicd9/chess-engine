@@ -96,6 +96,67 @@ fn reports_forced_mate() {
     );
 }
 
+/// The mirror of `reports_forced_mate`, and a bug that shipped: the mate
+/// distance came back unsigned, so a position the engine was *losing* by force
+/// reported `mate 1` -- "I mate in one" -- instead of `mate -1`, and every
+/// consumer of the score read a loss as a win. The search was never wrong; only
+/// the number it published was.
+///
+/// The position is from the game that found it: LupanjeBetona-ariadne-bot,
+/// lichess 81n8PlYz, before White's 57th move. White is mated next move.
+#[test]
+fn reports_being_mated_with_a_negative_score() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    let (_, lines) = engine.bestmove(
+        "position fen 8/1p3pk1/6pp/2p5/2P4P/3n1qP1/7K/3r4 w - - 2 57",
+        "go depth 4",
+    );
+    let mates: Vec<_> = lines.iter().filter(|l| l.contains("score mate")).collect();
+    assert!(!mates.is_empty(), "no mate score reported at all: {lines:?}");
+    assert!(
+        mates.iter().all(|l| l.contains("score mate -1")),
+        "being mated in 1 must report `mate -1`, never a winning score: {mates:?}"
+    );
+}
+
+/// Mate *distance* used to be measured in leftover search budget rather than in
+/// plies. A check extension hands the search an extra unit of budget, and a
+/// mating attack is a string of checks, so the distance came back short: this
+/// position is a mate in 4 and the engine announced `mate 3`. Quiescence had
+/// the same fault from the other end -- it is entered at depth 0 and never
+/// decrements, so every mate found there scored as a mate at the root.
+///
+/// From LupanjeBetona-ariadne-bot, lichess 81n8PlYz, after White's 54th move.
+/// Stockfish 19 puts the fastest mate at 4 (`Ne1+`) and the line this search
+/// actually picks, `Nf4+`, at 5. Either is an honest report; the old encoding
+/// announced that same `Nf4+` line as **mate 3**, which is what this guards
+/// against -- so assert the distance is never understated rather than pinning a
+/// number the search could legitimately improve on.
+#[test]
+fn reports_the_true_mate_distance_through_checks() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    let (_, lines) = engine.bestmove(
+        "position fen 8/1p3pk1/6pp/2p2q2/2P4P/r2n2P1/3R2K1/8 b - - 3 54",
+        "go depth 8",
+    );
+    let mates: Vec<i32> = lines
+        .iter()
+        .filter_map(|l| l.split("score mate ").nth(1))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    assert!(!mates.is_empty(), "no mate score reported: {lines:?}");
+    for m in &mates {
+        assert!(
+            *m >= 4,
+            "mate distance understated: reported {m}, but no mate here is faster \
+             than 4 (checks along the line used to inflate the count): {lines:?}"
+        );
+    }
+}
+
 /// An unfinished iteration has to be abandoned when the time runs out, so both
 /// a fixed `movetime` and a clock have to come back well inside their budget.
 #[test]

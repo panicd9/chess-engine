@@ -26,12 +26,24 @@ pub enum Bound {
 
 /// Scores at least this extreme encode a mate rather than an evaluation.
 ///
-/// Mate scores are relative to the depth they were found at, not to the root,
-/// so reusing one at a different depth would report the wrong distance. They
-/// are never stored or returned from the table; only the move is kept. Fixing
-/// this properly means storing mates relative to ply, which is worth doing
-/// alongside a real mate-distance rewrite rather than bolted on here.
+/// Mate scores are relative to **ply** -- the distance from the root -- which is
+/// an absolute property of where the mate is, so a score means the same thing
+/// wherever it surfaces and needs no adjusting as it propagates. They are still
+/// never stored in or returned from the table; only the move is kept.
+///
+/// They used to be relative to the *remaining depth* instead, which is only a
+/// ply count while depth falls by exactly one per ply. It does not: a check
+/// extension adds to it, and quiescence is entered at depth 0 and never
+/// decrements. Mating lines are checking lines, so distances came out short --
+/// a real mate in 4 reported as `mate 3`.
 const MATE_SCORE_THRESHOLD: i32 = i32::MAX - 2 * 1000;
+
+/// The score for being checkmated *at* the root, which every other mate score
+/// is an offset from: being mated at ply `p` scores `MATED_AT_ROOT + p`, and
+/// delivering mate there scores the negation. Later mates against us score
+/// higher (prefer the slowest loss) and earlier mates by us score higher still
+/// once negated (prefer the fastest win).
+const MATED_AT_ROOT: i32 = i32::MIN + MATE_BOUND;
 
 fn is_mate_score(score: i32) -> bool {
     score > MATE_SCORE_THRESHOLD || score < -MATE_SCORE_THRESHOLD
@@ -287,7 +299,7 @@ fn search_node(
     // Quiescence counts its own nodes, so leave the leaf to it rather than
     // counting this position twice.
     if depth == 0 {
-        return quiescence_search_best_move(cb, is_white_turn, depth, alpha, beta);
+        return quiescence_search_best_move(cb, is_white_turn, ply, alpha, beta);
     }
 
     if count_node_and_should_stop() {
@@ -364,7 +376,7 @@ fn search_node(
 
     if legal_moves.moves.is_empty() {
         pool::give(legal_moves.into_inner());
-        return (terminal_score(cb, is_white_turn, depth), *cb);
+        return (terminal_score(cb, is_white_turn, ply as u32), *cb);
     }
 
     // Promote this ply's killers so the lazy selection in `next_move` picks
@@ -561,6 +573,7 @@ fn search_node(
 pub fn nega_max_alpha_beta_best_line(
     cb: &Chessboard,
     depth: u32,
+    ply: u32,
     is_white_turn: bool,
     mut alpha: i32,
     beta: i32,
@@ -588,12 +601,13 @@ pub fn nega_max_alpha_beta_best_line(
         let child_results = nega_max_alpha_beta_best_line(
             &pos,
             depth - 1,
+            ply + 1,
             !is_white_turn,
             safe_beta,
             safe_alpha,
         );
         if child_results.is_empty() {
-            let score = terminal_score(cb, is_white_turn, depth);
+            let score = terminal_score(cb, is_white_turn, ply);
             return vec![(score, vec![cb.clone(), pos])];
         }
 
@@ -626,7 +640,7 @@ pub fn nega_max_alpha_beta_best_line(
 pub fn quiescence_search_best_move(
     cb: &Chessboard,
     is_white_turn: bool,
-    depth: u32,
+    ply: usize,
     mut alpha: i32,
     beta: i32,
 ) -> (i32, Chessboard) {
@@ -669,7 +683,7 @@ pub fn quiescence_search_best_move(
         // two score differently (stalemate is a draw however the evaluation
         // reads), so they have to be told apart.
         if checked || !crate::move_gen::has_any_legal_move(cb, is_white_turn) {
-            return (terminal_score(cb, is_white_turn, depth), best_board);
+            return (terminal_score(cb, is_white_turn, ply as u32), best_board);
         }
         return (best_score, best_board);
     }
@@ -722,7 +736,7 @@ pub fn quiescence_search_best_move(
         // Quiescence is entered at depth 0 and is bounded by captures running
         // out, not by this counter, so it must saturate rather than wrap.
         let child_result =
-            quiescence_search_best_move(&pos, !is_white_turn, depth.saturating_sub(1), safe_beta, safe_alpha);
+            quiescence_search_best_move(&pos, !is_white_turn, ply + 1, safe_beta, safe_alpha);
 
         // Invert the child's score (negamax style).
         let score = -child_result.0;
@@ -835,9 +849,9 @@ pub fn quiescence_search_best_line(
 /// Checkmate is a loss for the side to move; stalemate is a draw and must score
 /// 0, not a loss, or the engine happily stalemates a won position. The score is
 /// relative to the side to move, so it does not depend on colour. Mates found
-/// nearer the root (larger `depth`) score worse, so the search prefers the
+/// nearer the root (smaller `ply`) score worse, so the search prefers the
 /// slowest loss and the fastest win.
-pub fn terminal_score(cb: &Chessboard, is_white_turn: bool, depth: u32) -> i32 {
+pub fn terminal_score(cb: &Chessboard, is_white_turn: bool, ply: u32) -> i32 {
     let in_check = if is_white_turn {
         cb.is_white_king_under_attack()
     } else {
@@ -848,7 +862,7 @@ pub fn terminal_score(cb: &Chessboard, is_white_turn: bool, depth: u32) -> i32 {
         return DRAW; // Stalemate.
     }
 
-    i32::MIN + (MATE_BOUND - depth as i32)
+    MATED_AT_ROOT + ply as i32
 }
 
 /// Identifies a move by the squares the moving side vacated and filled.
@@ -990,20 +1004,22 @@ const MATE_BOUND: i32 = 1000;
 /// Plies to mate encoded in `score`, or `None` if it is an ordinary score.
 ///
 /// This is the inverse of the mate score [`terminal_score`] produces, and lives
-/// beside it so the two cannot drift apart. `depth` is the depth the score came
-/// back from, which is what turns the remaining depth stored in the score into
-/// a distance from the root.
-pub fn mate_in_plies(score: i32, depth: u32) -> Option<u32> {
-    // A mate score is `i32::MIN + (MATE_BOUND - depth_remaining)` for being
-    // mated, and that value negated for delivering mate.
-    let depth_remaining = if score > i32::MAX - 2 * MATE_BOUND {
-        score - (i32::MAX - (MATE_BOUND - 1))
-    } else if score < i32::MIN + 2 * MATE_BOUND {
-        (i32::MIN + MATE_BOUND) - score
+/// beside it so the two cannot drift apart. The distance is carried in the
+/// score itself, so unlike the depth-relative encoding this replaced, no
+/// context from the caller is needed to read it back.
+///
+/// **Signed like the score it decodes**: positive when the side to move gives
+/// the mate, negative when it is the one being mated. The two are separate
+/// branches of the encoding and a bare distance cannot tell them apart, which
+/// is how `mate N` was once reported for a position the engine was losing.
+pub fn mate_in_plies(score: i32) -> Option<i32> {
+    if score > MATE_SCORE_THRESHOLD {
+        Some(-score - MATED_AT_ROOT) // Delivering: the negation of a mated score.
+    } else if score < -MATE_SCORE_THRESHOLD {
+        Some(-(score - MATED_AT_ROOT)) // Being mated: negative, by the doc above.
     } else {
-        return None;
-    };
-    Some(depth.saturating_sub(depth_remaining.max(0) as u32))
+        None
+    }
 }
 
 /// The line the search currently believes both sides will play.

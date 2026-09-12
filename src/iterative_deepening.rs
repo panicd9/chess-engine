@@ -14,7 +14,7 @@ pub fn iterative_deepening_best_5_lines(
     let mut beta = i32::MAX - 1;
 
     for depth in 1..=max_depth {
-        let current_lines = nega_max_alpha_beta_best_line(cb, depth, is_white_turn, alpha, beta);
+        let current_lines = nega_max_alpha_beta_best_line(cb, depth, 0, is_white_turn, alpha, beta);
 
         if !current_lines.is_empty() {
             best_lines = current_lines;
@@ -45,7 +45,7 @@ pub fn iterative_deepening_best_5_lines_with_interupt_support(
             break;
         }
 
-        let current_lines = nega_max_alpha_beta_best_line(cb, depth, is_white_turn, alpha, beta);
+        let current_lines = nega_max_alpha_beta_best_line(cb, depth, 0, is_white_turn, alpha, beta);
         if !current_lines.is_empty() {
             best_lines = current_lines;
             alpha = best_lines[0].0.max(alpha);

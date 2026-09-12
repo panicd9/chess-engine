@@ -64,9 +64,20 @@ may return a score from the table at ply 0 (that path has no move to report, and
 `bestmove` would fall through to whatever `legal_moves` yields first), and
 anything cached must be valid for the whole game, not just this search.
 
-**Search scores are relative to the side to move.** Mate scores are
-`i32::MIN + (MATE_BOUND - depth)`; `search::mate_in_plies` is the only place
-that decodes them. Do not reimplement that arithmetic elsewhere.
+**Search scores are relative to the side to move.** Mate scores are relative to
+**ply**: being mated at ply `p` scores `MATED_AT_ROOT + p`, delivering mate
+there scores the negation. Ply is absolute, so a mate score means the same
+thing wherever it surfaces and needs no adjusting as it propagates.
+`search::mate_in_plies` is the only place that decodes them, it needs no
+context to do so, and it returns a *signed* distance -- negative when the side
+to move is the one being mated. Do not reimplement that arithmetic elsewhere.
+
+This replaced an encoding relative to the *remaining depth*, which is only a
+ply count while depth falls by exactly one per ply -- and it does not: a check
+extension adds to it, and quiescence is entered at depth 0 and never
+decrements. Mating lines are checking lines, so reported distances came out
+short (a real mate in 4 announced as `mate 3`), and every mate found in
+quiescence scored identically. Both are covered by `tests/uci.rs`.
 
 ## Known traps
 

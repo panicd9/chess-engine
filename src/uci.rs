@@ -381,7 +381,7 @@ fn search_and_report(
         report_info(&board, score, depth, started, &history);
 
         // A forced mate is as good as it gets; searching deeper cannot improve it.
-        if search::mate_in_plies(score, depth).is_some() {
+        if search::mate_in_plies(score).is_some() {
             break;
         }
 
@@ -439,9 +439,15 @@ fn report_info(
     let nodes = search::nodes_searched();
     let nps = nodes * 1000 / millis;
 
-    let score_text = match search::mate_in_plies(score, depth) {
-        // UCI counts mate in moves, and signs it from the side to move.
-        Some(plies) => format!("mate {}", (plies + 1) / 2),
+    let score_text = match search::mate_in_plies(score) {
+        // UCI counts mate in moves, and signs it from the side to move: a
+        // negative count says the side to move is the one being mated. The
+        // distance is signed, so round the magnitude and carry the sign over --
+        // `(plies + 1) / 2` on a negative value rounds the wrong way.
+        Some(plies) => {
+            let moves = (plies.abs() + 1) / 2;
+            format!("mate {}", if plies < 0 { -moves } else { moves })
+        }
         None => format!("cp {score}"),
     };
     // The whole line, not just the move: a GUI shows it as the engine's plan,
