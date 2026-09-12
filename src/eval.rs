@@ -18,30 +18,48 @@ use crate::piece_square_tables::{eval, EVAL_TABLES};
 /// The weights these terms use, all in centipawns.
 ///
 /// Overridable at runtime so they can be tuned by playing matches rather than
-/// by rebuilding for each candidate: see the `EvalWeight` UCI options. The
-/// defaults are hand-picked starting points, not tuned values.
+/// by rebuilding for each candidate: see the `EvalWeight` UCI options.
+///
+/// **These are fitted values, not guesses.** They come from a Texel fit against
+/// two independently sourced public corpora -- each held out against the other,
+/// since neither has game ids -- and were then measured over the board:
+/// **+17.1 +/- 7.6 Elo, LOS 100%, over 5000 games at 10+0.1** against the
+/// hand-picked set they replaced. Do not adjust one by eye; the six were fitted
+/// and measured together.
 pub mod weights {
     use std::sync::atomic::{AtomicI32, Ordering};
 
-    /// Per square of mobility, by piece. The weight falls as the piece gets
-    /// bigger, which is the opposite of what it looks like it should be: a queen
-    /// already attacks many squares from anywhere, so counting each of them at
-    /// the knight's rate would swamp the rest of the evaluation and reward
-    /// shuffling her into the open. The term as a whole is worth +58.7 +/- 26.1
-    /// Elo over 400 games against setting all four to zero; these particular
-    /// numbers are still hand-picked and have never been tuned against
-    /// alternatives.
-    pub static KNIGHT_MOBILITY: AtomicI32 = AtomicI32::new(4);
-    pub static BISHOP_MOBILITY: AtomicI32 = AtomicI32::new(4);
-    pub static ROOK_MOBILITY: AtomicI32 = AtomicI32::new(2);
-    pub static QUEEN_MOBILITY: AtomicI32 = AtomicI32::new(1);
+    /// Per square of mobility, by piece. The term as a whole is worth
+    /// +58.7 +/- 26.1 Elo over 400 games against setting all four to zero.
+    ///
+    /// These were 4/4/2/1, on the reasoning that the weight should fall as the
+    /// piece gets bigger because a queen already attacks many squares from
+    /// anywhere, so counting each at the knight's rate would swamp the rest of
+    /// the evaluation and reward shuffling her into the open. **The fit
+    /// disagrees and the board agreed with the fit**: it is close to flat, and
+    /// the rook -- which gains the most from a line opening -- is now the
+    /// highest. The reasoning was sound and the conclusion was wrong.
+    pub static KNIGHT_MOBILITY: AtomicI32 = AtomicI32::new(3);
+    pub static BISHOP_MOBILITY: AtomicI32 = AtomicI32::new(3);
+    pub static ROOK_MOBILITY: AtomicI32 = AtomicI32::new(4);
+    pub static QUEEN_MOBILITY: AtomicI32 = AtomicI32::new(3);
 
     /// Per missing pawn of the three in front of a castled king.
-    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(12);
+    ///
+    /// Was 12. Both corpora pushed it down hard and independently, which is the
+    /// most surprising part of the fit: counting missing pawns is a crude proxy
+    /// for king safety, and overpaying for it makes the engine hold pawns in
+    /// front of its king that are worth more elsewhere.
+    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(5);
 
     /// Scales the passed pawn bonus, as a percentage. 100 leaves the by-rank
     /// table below unchanged.
-    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(100);
+    ///
+    /// Was 100. The cut is small and it agrees with an independent measurement:
+    /// regressing `evaluate()` against Stockfish 19 over 66k quiet positions
+    /// found the passed-pawn term over-generous by ~16cp per pawn, on top of
+    /// what the piece-square tables already pay an advanced pawn.
+    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(84);
 
     /// Set a weight by name. Unknown names are ignored, as UCI requires.
     /// Returns whether the name was recognised.

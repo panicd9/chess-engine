@@ -188,12 +188,12 @@ pub fn run() -> io::Result<()> {
                     println!("option name {name} type check default true");
                 }
                 for (name, default, min, max) in [
-                    ("KnightMobility", 4, 0, 30),
-                    ("BishopMobility", 4, 0, 30),
-                    ("RookMobility", 2, 0, 30),
-                    ("QueenMobility", 1, 0, 30),
-                    ("KingShield", 12, 0, 100),
-                    ("PassedPawnScale", 100, 0, 400),
+                    ("KnightMobility", 3, 0, 30),
+                    ("BishopMobility", 3, 0, 30),
+                    ("RookMobility", 4, 0, 30),
+                    ("QueenMobility", 3, 0, 30),
+                    ("KingShield", 5, 0, 100),
+                    ("PassedPawnScale", 84, 0, 400),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }
