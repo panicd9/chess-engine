@@ -36,6 +36,21 @@ const DEFAULT_TABLE_MEGABYTES: usize = 64;
 const MIN_TABLE_MEGABYTES: usize = 1;
 const MAX_TABLE_MEGABYTES: usize = 1024;
 
+/// Smallest budget a clock may produce. Without a floor, `budget` returns zero
+/// whenever the overhead swallows the whole share -- with no increment that is
+/// `remaining <= EXPECTED_MOVES_LEFT * overhead`, i.e. below 3s of clock at the
+/// bot's `Move Overhead: 100`. A zero budget puts the deadline at `started`, so
+/// the watchdog fires before the first node and `bestmove` falls through to an
+/// unsearched move: `go wtime 3000 btime 3000` answered `a2a3` with no `info`
+/// line at all. Stockfish guards the same way (`std::max(1.0, ...)` on its
+/// optimum), and below one move's overhead the game is lost regardless -- an
+/// unsearched move only makes it lost faster.
+///
+/// 10ms rather than 1ms because a completed iteration is what actually matters:
+/// measured on this machine, 2ms reaches depth 1 from a middlegame position and
+/// 1ms reaches nothing.
+const MIN_BUDGET_MS: u64 = 10;
+
 /// Default time held back from every budget, overridable with
 /// `setoption name Move Overhead`. GUIs raise it when the connection is slow.
 const DEFAULT_MOVE_OVERHEAD_MS: u64 = 30;
@@ -124,7 +139,10 @@ impl Limits {
             return None;
         }
         if let Some(ms) = self.movetime {
-            return Some(Duration::from_millis(ms).saturating_sub(overhead));
+            // An explicit `movetime` is an instruction rather than a share of a
+            // clock, so the floor may not exceed it: a GUI asking for 1ms gets 1ms.
+            let target = ms.saturating_sub(overhead.as_millis() as u64);
+            return Some(Duration::from_millis(target.max(MIN_BUDGET_MS.min(ms))));
         }
 
         let (remaining, increment) = match side_to_move {
@@ -145,7 +163,8 @@ impl Limits {
         // not.
         let share = remaining / self.movestogo.unwrap_or(EXPECTED_MOVES_LEFT).max(1);
         let target = (share + increment * 3 / 4).min(remaining / 3);
-        Some(Duration::from_millis(target).saturating_sub(overhead))
+        let target = target.saturating_sub(overhead.as_millis() as u64);
+        Some(Duration::from_millis(target.max(MIN_BUDGET_MS)))
     }
 }
 
@@ -279,6 +298,14 @@ fn search_and_report(
     mut history: History,
     options: Options,
 ) -> History {
+    // Before the clock starts: sizing the table is setup, not thinking, and
+    // charging it to the move is a straight loss. Measured at 17ms on the first
+    // search of a game at the default `Hash 64` -- 4.5% of a whole move at
+    // 10+0.1, and fatal next to a floor of a few milliseconds. It is a no-op on
+    // every later search, so only the first move of a game ever paid it.
+    search::reset_nodes();
+    history.ensure_table(options.table_megabytes);
+
     let started = Instant::now();
     let budget = limits.budget(board.side_to_move, options.move_overhead);
 
@@ -335,8 +362,6 @@ fn search_and_report(
 
     let is_white = board.side_to_move == Color::White;
     let max_depth = limits.depth.unwrap_or(MAX_DEPTH);
-    search::reset_nodes();
-    history.ensure_table(options.table_megabytes);
 
     let mut best: Option<Chessboard> = None;
     // The reply the last completed iteration expected, remembered as it was
@@ -425,7 +450,13 @@ fn search_and_report(
     // Stopped before even depth 1 finished: answer with any legal move rather
     // than nothing.
     if best.is_none() {
-        best = legal_moves(&board).first().map(|m| m.chessboard);
+        // Ordered by the same score the search would have used, so even this
+        // path plays a winning capture rather than whatever the generator
+        // happened to emit first -- which was `a2a3` from the opening position.
+        best = legal_moves(&board)
+            .into_iter()
+            .max_by_key(|m| m.score)
+            .map(|m| m.chessboard);
     }
 
     match best.and_then(|position| describe_move(&board, &position).map(|mv| (position, mv))) {

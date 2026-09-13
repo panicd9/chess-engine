@@ -250,6 +250,52 @@ fn respects_time_limits() {
     }
 }
 
+/// Every search must report at least one completed iteration. It did not: with
+/// no increment, `budget` reaches zero at `remaining <= 30 * overhead` -- 3000ms
+/// at the bot's `Move Overhead: 100` -- which puts the deadline at the instant
+/// the search starts, so the watchdog fires before the first node, no `info`
+/// line is ever printed and `bestmove` falls through to an unsearched move.
+///
+/// From the position below the engine answered `a2a3`. lichess-bot subtracts its
+/// own `move_overhead: 2000` before the engine sees the clock, so in a rated
+/// no-increment game this began under ~5s of real clock and lasted to the end.
+#[test]
+fn low_clock_without_increment_still_searches() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Move Overhead value 100");
+    for clock in [3000, 2000, 1000, 500] {
+        let (mv, lines) = engine.bestmove(
+            "position startpos moves e2e4 e7e5 g1f3 b8c6",
+            &format!("go wtime {clock} btime {clock}"),
+        );
+        assert_eq!(mv.len(), 4, "no move at wtime {clock}");
+        assert!(
+            lines.iter().any(|l| l.starts_with("info depth")),
+            "wtime {clock} reported no completed iteration, so `{mv}` was never \
+             searched: {lines:?}"
+        );
+        assert_ne!(mv, "a2a3", "wtime {clock} played the generator's first move");
+    }
+}
+
+/// An explicit `movetime` is an instruction, not a share of a clock, so the
+/// floor that fixes the above must not override it.
+#[test]
+fn tiny_movetime_is_still_honoured() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Move Overhead value 100");
+    let started = Instant::now();
+    let (mv, _) = engine.bestmove("position startpos", "go movetime 1");
+    assert_eq!(mv.len(), 4);
+    assert!(
+        started.elapsed().as_millis() < 200,
+        "`go movetime 1` took {:?}; the floor is overriding an explicit request",
+        started.elapsed()
+    );
+}
+
 #[test]
 fn understands_fen_and_move_lists() {
     let mut engine = Engine::start();
