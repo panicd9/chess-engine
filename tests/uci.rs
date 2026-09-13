@@ -159,6 +159,81 @@ fn reports_the_true_mate_distance_through_checks() {
 
 /// An unfinished iteration has to be abandoned when the time runs out, so both
 /// a fixed `movetime` and a clock have to come back well inside their budget.
+/// The principal variation must begin with the move the engine actually plays,
+/// and the `ponder` token must be the reply to *that* move.
+///
+/// It did not. `report_info` walked the whole line out of the transposition
+/// table, independently of the position the search returned, and the two can
+/// disagree: the table lives for the whole game, so the root can already hold a
+/// deeper entry from an earlier search, and a depth-preferred store then refuses
+/// to replace it. Every search that returns a *mate* score is exposed, because
+/// the mate break leaves the deepening loop long before the root store could
+/// win.
+///
+/// Measured over 19 of the bot's games: the table's root move disagreed with the
+/// move played on 37 of 1752 searches -- 20-34% of all mate scores, and none of
+/// the 1620 others. Taking the ponder move from the PV (which is otherwise
+/// right, and fixed a third of the tokens being wrong) turned that into a reply
+/// to a move the engine was not making: 8 were not even legal in the position
+/// the opponent would face.
+///
+/// The position is from the bot's game against follychess-com, lichess
+/// M4v72Yic, replayed from move 30. The table has to be warmed by the game to
+/// reach the state that fails -- the same position searched cold does not
+/// reproduce it -- so the test replays the last five of its own moves in order.
+#[test]
+fn the_principal_variation_starts_with_the_move_played() {
+    // The game, in full. The engine had Black; it is replayed from ply 58 so the
+    // table reaches the state that exposed the bug, which takes five searches.
+    const MOVES: &str = "d2d4 d7d5 e2e4 d5e4 c1e3 g8f6 f1b5 c7c6 b5c4 b8d7 g1e2 d7b6 \
+b1d2 g7g6 e1g1 b6c4 d2c4 f8g7 c4d2 h7h5 e3g5 c8f5 d2c4 h5h4 c4e3 h4h3 e3f5 g6f5 g2h3 h8h3 \
+g1g2 h3h8 c2c4 g7h6 g5f6 e7f6 d1c2 d8c7 h2h3 e8c8 f1g1 d8g8 g2h1 h6g5 h1g2 g5e3 g2f1 g8g1 \
+f1g1 h8h3 f2e3 c7h2 g1f1 h3e3 a1d1 e3f3 f1e1 e4e3 e2f4 h2g3 e1e2 f3f2 e2d3 e3e2 d3d2 e2d1q \
+d2d1 g3g1";
+    let moves: Vec<&str> = MOVES.split_whitespace().collect();
+
+    let mut engine = Engine::start();
+    engine.handshake();
+    // The size the bot plays with matters: the entry has to survive to be read
+    // back, and a smaller table may evict it before the disagreement can happen.
+    engine.send("setoption name Hash value 256");
+    engine.send("ucinewgame");
+    engine.send("isready");
+    engine.read_until("readyok");
+
+    let mut checked = 0;
+    // Black moves on the odd plies. Ply 59 onwards is the last five of them.
+    for ply in (59..moves.len()).step_by(2) {
+        let position = format!("position startpos moves {}", moves[..ply].join(" "));
+        let (mv, lines) = engine.bestmove(&position, "go depth 6");
+
+        let info = lines
+            .iter()
+            .rev()
+            .find(|l| l.starts_with("info ") && l.contains(" pv "))
+            .unwrap_or_else(|| panic!("no info line with a pv at ply {ply}: {lines:?}"));
+        let pv: Vec<&str> = info.split(" pv ").nth(1).unwrap().split_whitespace().collect();
+        assert_eq!(
+            pv.first().copied(),
+            Some(mv.as_str()),
+            "ply {ply}: the pv does not start with the move played\n  {info}\n  bestmove {mv}"
+        );
+
+        // The `ponder` token is the second move of that line, so it is the reply
+        // to the move being played rather than to some other one.
+        let best = lines.last().unwrap();
+        if let Some(ponder) = best.split_whitespace().nth(3) {
+            assert_eq!(
+                pv.get(1).copied(),
+                Some(ponder),
+                "ply {ply}: ponder token is not the pv's reply\n  {info}\n  {best}"
+            );
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 5, "expected five searches, ran {checked}");
+}
+
 #[test]
 fn respects_time_limits() {
     let mut engine = Engine::start();
