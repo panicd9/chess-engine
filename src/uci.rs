@@ -55,12 +55,72 @@ const MIN_BUDGET_MS: u64 = 10;
 /// `setoption name Move Overhead`. GUIs raise it when the connection is slow.
 const DEFAULT_MOVE_OVERHEAD_MS: u64 = 30;
 
+/// What share of the even slice the soft bound gets, in percent.
+///
+/// Not 100. Finishing the iteration in flight rather than abandoning it costs
+/// real time -- measured over eight positions at a 1970ms slice, spend went
+/// 1791ms -> 2517ms (+41%) for +0.74 depth. That is worth having, but it is a
+/// decision about *how much* to allocate, which belongs with the allocation
+/// curve and not here: mixing the two would mean an A/B that cannot say which
+/// half did the work. Scaling the soft bound down holds mean spend at the old
+/// figure, so the split can be measured as what it is -- the same time, spent
+/// on completed iterations instead of discarded ones.
+///
+/// 60 is where the spend matches. Measured over the same eight positions:
+///
+/// ```text
+/// one bound          1806 ms/move   depth 11.25
+/// soft 60 / max 300  1826 ms/move   depth 11.75
+/// soft 70 / max 300  2065 ms/move   depth 12.00
+/// soft 80 / max 300  2393 ms/move   depth 12.12
+/// ```
+///
+/// so +0.5 depth for +1% time. Raising it buys more depth by buying more time,
+/// which is phase 4's question, not this one's.
+const DEFAULT_SOFT_SCALE_PERCENT: u64 = 60;
+
+/// How far past `optimum` one iteration may run before the hard stop, in
+/// percent. Overridable with `setoption name Max Scale` so the value can be
+/// swept by playing matches rather than rebuilding, the way the evaluation
+/// weights are.
+///
+/// Still conservative next to Stockfish, which allows up to 687%, but it has to
+/// clear the cost of one iteration or the split buys nothing. Measured here over
+/// 40 iterations from six positions, an iteration costs a **median 2.31x** the
+/// one before it (mean 2.81, p75 3.10, p90 5.33). At the moment the soft bound
+/// is passed the last iteration accounts for about (r-1)/r of everything spent,
+/// so finishing the next one lands near `r * optimum` -- which means a 200%
+/// bound would cut off the median iteration just before it completed, leaving
+/// exactly the wasted work the split exists to avoid. 300% clears the median
+/// with room and reaches p75.
+const DEFAULT_MAX_SCALE_PERCENT: u64 = 300;
+
+/// The two bounds a clock implies.
+///
+/// `optimum` is what the search expects to need, and is read **only between
+/// iterations**: passing it means "do not start another", never "stop now".
+/// `maximum` is the hard stop, enforced on every node by the watchdog.
+///
+/// The split is what makes uneven spending possible at all. With one bound
+/// serving as both, an iteration that would have finished just past it is
+/// abandoned and thrown away -- and because a half-searched tree tells us
+/// nothing, that time is spent for no result. Stockfish has had the two apart
+/// since Glaurung; the chessprogramming.org name for them is the soft and hard
+/// bound.
+#[derive(Clone, Copy, Debug)]
+struct Budget {
+    optimum: Duration,
+    maximum: Duration,
+}
+
 /// Options a GUI may set. Anything else is accepted and ignored, as the
 /// protocol requires.
 #[derive(Clone, Copy)]
 struct Options {
     table_megabytes: usize,
     move_overhead: Duration,
+    soft_scale_percent: u64,
+    max_scale_percent: u64,
 }
 
 impl Default for Options {
@@ -68,6 +128,8 @@ impl Default for Options {
         Options {
             table_megabytes: DEFAULT_TABLE_MEGABYTES,
             move_overhead: Duration::from_millis(DEFAULT_MOVE_OVERHEAD_MS),
+            soft_scale_percent: DEFAULT_SOFT_SCALE_PERCENT,
+            max_scale_percent: DEFAULT_MAX_SCALE_PERCENT,
         }
     }
 }
@@ -91,6 +153,16 @@ impl Options {
             "move overhead" => {
                 if let Ok(ms) = value.parse::<u64>() {
                     self.move_overhead = Duration::from_millis(ms.min(5000));
+                }
+            }
+            "soft scale" => {
+                if let Ok(percent) = value.parse::<u64>() {
+                    self.soft_scale_percent = percent.clamp(10, 200);
+                }
+            }
+            "max scale" => {
+                if let Ok(percent) = value.parse::<u64>() {
+                    self.max_scale_percent = percent.clamp(100, 1000);
                 }
             }
             // Evaluation weights, exposed so they can be tuned by playing
@@ -133,16 +205,21 @@ struct Limits {
 }
 
 impl Limits {
-    /// How long to think, or `None` to search until told to stop.
-    fn budget(&self, side_to_move: Color, overhead: Duration) -> Option<Duration> {
+    /// The bounds to think within, or `None` to search until told to stop.
+    fn budget(&self, side_to_move: Color, options: &Options) -> Option<Budget> {
         if self.infinite {
             return None;
         }
+        let overhead_ms = options.move_overhead.as_millis() as u64;
         if let Some(ms) = self.movetime {
             // An explicit `movetime` is an instruction rather than a share of a
-            // clock, so the floor may not exceed it: a GUI asking for 1ms gets 1ms.
-            let target = ms.saturating_sub(overhead.as_millis() as u64);
-            return Some(Duration::from_millis(target.max(MIN_BUDGET_MS.min(ms))));
+            // clock, so the floor may not exceed it -- a GUI asking for 1ms gets
+            // 1ms -- and there is no headroom to grant either: exceeding what
+            // was asked for would be a protocol violation, so the two bounds
+            // coincide and the watchdog enforces the number given.
+            let target = ms.saturating_sub(overhead_ms).max(MIN_BUDGET_MS.min(ms));
+            let target = Duration::from_millis(target);
+            return Some(Budget { optimum: target, maximum: target });
         }
 
         let (remaining, increment) = match side_to_move {
@@ -163,8 +240,20 @@ impl Limits {
         // not.
         let share = remaining / self.movestogo.unwrap_or(EXPECTED_MOVES_LEFT).max(1);
         let target = (share + increment * 3 / 4).min(remaining / 3);
-        let target = target.saturating_sub(overhead.as_millis() as u64);
-        Some(Duration::from_millis(target.max(MIN_BUDGET_MS)))
+        let target = target.saturating_sub(overhead_ms);
+        let optimum = (target * options.soft_scale_percent / 100).max(MIN_BUDGET_MS);
+
+        // Headroom for an iteration already in flight, bounded twice: by the
+        // multiplier, and by half of what is left on the clock so that no single
+        // move can put the game in danger however the multiplier is set.
+        let maximum = (optimum * options.max_scale_percent / 100)
+            .min(remaining.saturating_sub(overhead_ms) / 2)
+            .max(optimum);
+
+        Some(Budget {
+            optimum: Duration::from_millis(optimum),
+            maximum: Duration::from_millis(maximum),
+        })
     }
 }
 
@@ -193,6 +282,14 @@ pub fn run() -> io::Result<()> {
                 println!(
                     "option name Move Overhead type spin default {DEFAULT_MOVE_OVERHEAD_MS} \
                      min 0 max 5000"
+                );
+                println!(
+                    "option name Soft Scale type spin default {DEFAULT_SOFT_SCALE_PERCENT} \
+                     min 10 max 200"
+                );
+                println!(
+                    "option name Max Scale type spin default {DEFAULT_MAX_SCALE_PERCENT} \
+                     min 100 max 1000"
                 );
                 // Declared only so the GUI will send `go ponder`: cutechess sets
                 // its `m_canPonder` from the presence of this option and never
@@ -307,7 +404,7 @@ fn search_and_report(
     history.ensure_table(options.table_megabytes);
 
     let started = Instant::now();
-    let budget = limits.budget(board.side_to_move, options.move_overhead);
+    let budget = limits.budget(board.side_to_move, &options);
 
     // While pondering the clock has not started: we are searching on the
     // opponent's time. There is no deadline until `ponderhit` arrives, at which
@@ -317,7 +414,7 @@ fn search_and_report(
     let deadline = if limits.ponder {
         None
     } else {
-        budget.map(|b| started + b)
+        budget.map(|b| started + b.maximum)
     };
 
     // A watchdog stops the search when the budget runs out. It is woken early
@@ -342,7 +439,7 @@ fn search_and_report(
                     }
                 }
                 // The clock starts now.
-                let deadline = Instant::now() + budget;
+                let deadline = Instant::now() + budget.maximum;
                 let wait = deadline.saturating_duration_since(Instant::now());
                 if done_rx.recv_timeout(wait) == Err(RecvTimeoutError::Timeout) {
                     search::STOP.store(true, Ordering::Relaxed);
@@ -421,13 +518,27 @@ fn search_and_report(
             break;
         }
 
-        // Stop if the next iteration plainly cannot fit: it costs several times
-        // the last one, and an unfinished depth is wasted work.
-        if let Some(deadline) = deadline {
-            let elapsed = started.elapsed();
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining < elapsed / 2 {
-                break;
+        // The soft bound. Past `optimum`, do not start another iteration --
+        // but leave alone whatever is already running, which the watchdog holds
+        // to `maximum`. An iteration abandoned part-way is discarded whole, so
+        // once one is under way the choice is between finishing it and having
+        // spent the time for nothing.
+        //
+        // This replaces `remaining < elapsed / 2`, which asked whether the next
+        // iteration would fit inside the *hard* deadline and then let the
+        // watchdog kill it when the guess was wrong. That guess is only a ply
+        // count while each iteration costs exactly twice the last, and the cost
+        // ratio is neither constant nor 2.
+        //
+        // `deadline` rather than `budget` is the guard because a ponder search
+        // has bounds but no deadline: it is on the opponent's clock, so nothing
+        // limits it until `ponderhit`, after which the watchdog counts from the
+        // hit and this loop has no way to measure from there.
+        if deadline.is_some() {
+            if let Some(budget) = budget {
+                if started.elapsed() >= budget.optimum {
+                    break;
+                }
             }
         }
     }
