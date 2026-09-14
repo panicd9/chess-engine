@@ -84,6 +84,16 @@ pub struct History {
     /// What earlier searches -- including shallower iterative-deepening
     /// iterations -- concluded about positions seen along the way.
     pub table: TranspositionTable,
+    /// Zobrist keys of the positions reached by root moves whose search ran to
+    /// completion in the current iteration, in the order they finished. The
+    /// driver clears it before each root search.
+    ///
+    /// A search the clock stops part-way is normally discarded whole. That is
+    /// right for the moves it did not finish, but the root's *finished* moves
+    /// carry genuine scores at this iteration's depth, and throwing them away
+    /// throws away the most expensive work of the move. This is what lets the
+    /// driver tell which of them it may trust.
+    pub root_completed: Vec<u64>,
     /// Set while the score currently being computed depends on the moves played
     /// to reach it rather than on the position alone. See [`History::table`].
     path_dependent: bool,
@@ -117,6 +127,7 @@ impl History {
             // Left empty so cloning a game history stays cheap; the search
             // driver sizes it once before searching.
             table: TranspositionTable::new(0),
+            root_completed: Vec::with_capacity(64),
             path_dependent: false,
             previous_move_score: None,
             previous_time_reduction: None,
@@ -560,6 +571,9 @@ fn search_node(
         // node has at this point is the best of the moves it actually finished.
         if STOP.load(Ordering::Relaxed) {
             break 'legal_moves;
+        }
+        if ply == 0 {
+            history.root_completed.push(zobrist::hash(&pos));
         }
 
         // If this move is better, update the best score and best position.

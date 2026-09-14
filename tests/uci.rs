@@ -341,6 +341,68 @@ fn pacing_factors_can_be_turned_off() {
     );
 }
 
+/// A search the clock stops part-way may now keep a move from the unfinished
+/// iteration. That path is exactly where the principal variation and the
+/// `ponder` token can drift from the move actually played -- the shipped bug in
+/// which ponder tokens were illegal -- and none of the depth-limited tests ever
+/// take it. So stop many searches mid-iteration with short `movetime`s and check
+/// every one: the reported line starts with the move played, the ponder token is
+/// its second move, and the move is legal in the position.
+#[test]
+fn stopped_iterations_report_the_move_they_play() {
+    let positions = [
+        "position startpos",
+        "position startpos moves e2e4 e7e5 g1f3 b8c6 f1b5 a7a6",
+        "position fen r1bq1rk1/pp2bppp/2n1pn2/2pp4/3P1B2/2PBPN2/PP1N1PPP/R2Q1RK1 w - - 0 9",
+        "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "position fen 2rq1rk1/pb2bppp/1p2pn2/8/2BP4/2N1PN2/PP3PPP/2RQ1RK1 w - - 0 13",
+        "position fen 8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    ];
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Salvage value true");
+    let mut checked = 0;
+    for position in positions {
+        for movetime in [15, 35, 60, 90, 140] {
+            engine.send("ucinewgame");
+            let (mv, lines) = engine.bestmove(position, &format!("go movetime {movetime}"));
+            assert!(mv.len() == 4 || mv.len() == 5, "no move from `{position}`: {lines:?}");
+
+            if let Some(last_info) = lines.iter().filter(|l| l.contains(" pv ")).next_back() {
+                let pv: Vec<&str> = last_info
+                    .split(" pv ")
+                    .nth(1)
+                    .unwrap()
+                    .split_whitespace()
+                    .collect();
+                assert_eq!(
+                    mv, pv[0],
+                    "`{position}` movetime {movetime}: bestmove is not the PV's first move: {last_info}"
+                );
+                let best_line: Vec<&str> = lines.last().unwrap().split_whitespace().collect();
+                if best_line.get(2) == Some(&"ponder") {
+                    assert_eq!(
+                        best_line.get(3),
+                        pv.get(1),
+                        "`{position}` movetime {movetime}: ponder token does not answer the move played"
+                    );
+                }
+            }
+
+            // Legal: the engine must accept it as a move and search after it.
+            engine.send(&format!("{position}{} {mv}", if position.contains(" moves ") { "" } else { " moves" }));
+            engine.send("go depth 1");
+            let after = engine.read_until("bestmove");
+            assert!(
+                !after.iter().any(|l| l.contains("bad position")),
+                "`{position}` movetime {movetime}: `{mv}` was rejected as illegal: {after:?}"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 30);
+}
+
 #[test]
 fn understands_fen_and_move_lists() {
     let mut engine = Engine::start();

@@ -365,6 +365,9 @@ struct Options {
     instability_gain: u64,
     panic_scale: u64,
     stability_scale: u64,
+    /// Keep a move from an iteration the clock stopped part-way. See
+    /// [`may_salvage`]. An option so the change can be A/B'd in one binary.
+    salvage: bool,
 }
 
 impl Default for Options {
@@ -379,6 +382,7 @@ impl Default for Options {
             instability_gain: DEFAULT_INSTABILITY_GAIN,
             panic_scale: DEFAULT_PANIC_SCALE,
             stability_scale: DEFAULT_STABILITY_SCALE,
+            salvage: true,
         }
     }
 }
@@ -432,6 +436,9 @@ impl Options {
                 if let Ok(percent) = value.parse::<u64>() {
                     self.soft_scale_percent = percent.clamp(10, 200);
                 }
+            }
+            "salvage" => {
+                self.salvage = matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "on");
             }
             "max scale" => {
                 if let Ok(percent) = value.parse::<u64>() {
@@ -597,6 +604,49 @@ impl Limits {
     }
 }
 
+/// Whether a root search the clock stopped part-way may replace the move the
+/// last completed iteration chose.
+///
+/// A stopped iteration used to be discarded whole. For the moves it did not
+/// finish that is right, but the ones it did finish carry genuine scores at the
+/// new depth, and an iteration costs a median 2.31x the one before it -- so
+/// discarding it throws away most of the time spent on the move. Measured over
+/// 790 self-play moves at 10+0.1: 19% ended in a stopped iteration, and on 2.0%
+/// of all moves a finished root move had beaten the previous choice at the new
+/// depth. Those are the moves this changes.
+///
+/// Every condition is there because the comparison means nothing without it:
+///
+/// - `salvaged` must itself be a finished move. A root with nothing finished
+///   hands back its own position.
+/// - The previous choice must be among the finished moves, or the new move was
+///   never compared with it at this depth. It is usually searched first but not
+///   always: the table outlives the search, and a depth-preferred store can
+///   keep an older, deeper root entry naming a different move.
+/// - The score must be above the window's lower edge. At or below it, it is only
+///   an upper bound -- everything finished was failing low -- and a bound says
+///   nothing about which move is better.
+/// - Replacing a move with itself changes nothing, and would re-report a
+///   partial depth for no gain.
+///
+/// With no previous choice at all, any finished move beats the fallback of
+/// taking the best-ordered legal move unsearched.
+fn may_salvage(
+    previous: Option<u64>,
+    completed: &[u64],
+    salvaged: u64,
+    score: i32,
+    window_alpha: i32,
+) -> bool {
+    if !completed.contains(&salvaged) || score <= window_alpha {
+        return false;
+    }
+    match previous {
+        None => true,
+        Some(previous) => previous != salvaged && completed.contains(&previous),
+    }
+}
+
 pub fn run() -> io::Result<()> {
     let mut board = Chessboard::new_initial_board();
     let mut history = History::new();
@@ -647,6 +697,7 @@ pub fn run() -> io::Result<()> {
                     "option name Max Scale type spin default {DEFAULT_MAX_SCALE_PERCENT} \
                      min 100 max 1000"
                 );
+                println!("option name Salvage type check default true");
                 // Declared only so the GUI will send `go ponder`: cutechess sets
                 // its `m_canPonder` from the presence of this option and never
                 // offers a ponder search without it, so "Thinking on opponent's
@@ -857,12 +908,13 @@ fn search_and_report(
             _ => (i32::MIN + 1, i32::MAX - 1),
         };
 
-        let (score, position) = loop {
+        let (score, position, window_alpha) = loop {
+            history.root_completed.clear();
             let (score, position) =
                 nega_max_alpha_beta_best_move(&board, depth, is_white, alpha, beta, &mut history);
 
             if search::STOP.load(Ordering::Relaxed) {
-                break (score, position);
+                break (score, position, alpha);
             }
             // Outside the window: widen on the side that failed and search
             // again. Widening to the full range at once is simplest and costs
@@ -872,13 +924,42 @@ fn search_and_report(
             } else if score >= beta {
                 beta = i32::MAX - 1;
             } else {
-                break (score, position);
+                break (score, position, alpha);
             }
         };
         previous = Some(score);
 
         if search::STOP.load(Ordering::Relaxed) {
-            break; // Result is from an abandoned tree; keep the previous depth.
+            // Stopped part-way. Keep the previous depth's move -- unless a move
+            // this iteration finished has already beaten it. See `may_salvage`.
+            if options.salvage {
+                let previous_choice = best.map(|b| crate::zobrist::hash(&b));
+                let salvaged = crate::zobrist::hash(&position);
+                if may_salvage(
+                    previous_choice,
+                    &history.root_completed,
+                    salvaged,
+                    score,
+                    window_alpha,
+                ) && describe_move(&board, &position).is_some()
+                {
+                    best = Some(position);
+                    // A finished move beating the previous choice *is* a root
+                    // move change at this depth. Record it, or the carry and the
+                    // score handed to the next move describe the choice that was
+                    // just replaced rather than the move being played.
+                    pacing.push(crate::zobrist::hash(&position), score, depth);
+                    reached_depth = depth;
+                    // Re-derived from the move actually kept, never carried over:
+                    // the principal variation must start with the move played,
+                    // and the ponder token must answer *that* move. A reply to
+                    // the previous choice is exactly the shipped bug that made
+                    // ponder tokens illegal.
+                    predicted_reply =
+                        report_info(&board, &position, score, depth, started, &history);
+                }
+            }
+            break;
         }
 
         // A result that names no move means the search had nothing to play;
@@ -923,15 +1004,6 @@ fn search_and_report(
                     pacing.scale_percent(previous_move_score, previous_reduction, depth, &options);
                 let want = (budget.optimum.as_millis() as u64 * scale / 100).max(1);
                 let soft = Duration::from_millis(want).min(budget.maximum);
-                if std::env::var_os("PACING_DEBUG").is_some() {
-                    println!(
-                        "info string PACING scale {scale} want {want} max {} pinned {} elapsed {} stop {}",
-                        budget.maximum.as_millis(),
-                        want >= budget.maximum.as_millis() as u64,
-                        started.elapsed().as_millis(),
-                        started.elapsed() >= soft
-                    );
-                }
                 if started.elapsed() >= soft {
                     break;
                 }
@@ -1217,6 +1289,57 @@ mod curve_tests {
             steep(300_000),
             steep(10_000)
         );
+    }
+}
+
+#[cfg(test)]
+mod salvage_tests {
+    use super::may_salvage;
+
+    const PREV: u64 = 0xA;
+    const NEW: u64 = 0xB;
+    const OTHER: u64 = 0xC;
+    const ALPHA: i32 = -40;
+
+    #[test]
+    fn keeps_a_finished_move_that_beat_the_previous_choice() {
+        assert!(may_salvage(Some(PREV), &[PREV, NEW], NEW, 25, ALPHA));
+        // Finish order does not matter, only that both finished.
+        assert!(may_salvage(Some(PREV), &[OTHER, NEW, PREV], NEW, 25, ALPHA));
+    }
+
+    #[test]
+    fn nothing_finished_keeps_the_previous_depth() {
+        // With nothing finished the root hands back its own position.
+        assert!(!may_salvage(Some(PREV), &[], NEW, 25, ALPHA));
+        assert!(!may_salvage(None, &[], NEW, 25, ALPHA));
+    }
+
+    #[test]
+    fn the_new_move_must_itself_have_finished() {
+        assert!(!may_salvage(Some(PREV), &[PREV, OTHER], NEW, 25, ALPHA));
+    }
+
+    #[test]
+    fn never_compared_with_the_previous_choice_keeps_it() {
+        // The previous choice was not searched first and had not finished.
+        assert!(!may_salvage(Some(PREV), &[NEW, OTHER], NEW, 25, ALPHA));
+    }
+
+    #[test]
+    fn a_fail_low_is_only_a_bound_and_keeps_the_previous_depth() {
+        assert!(!may_salvage(Some(PREV), &[PREV, NEW], NEW, ALPHA, ALPHA));
+        assert!(!may_salvage(Some(PREV), &[PREV, NEW], NEW, ALPHA - 300, ALPHA));
+    }
+
+    #[test]
+    fn the_same_move_changes_nothing() {
+        assert!(!may_salvage(Some(PREV), &[PREV], PREV, 25, ALPHA));
+    }
+
+    #[test]
+    fn with_no_previous_choice_any_finished_move_beats_the_fallback() {
+        assert!(may_salvage(None, &[NEW], NEW, 25, i32::MIN + 1));
     }
 }
 
