@@ -66,9 +66,13 @@ def main():
     ap.add_argument("--threads", type=int, default=1, help="Threads per worker")
     ap.add_argument("--hash", type=int, default=256, help="MB per worker")
     ap.add_argument("--limit", type=int, default=0, help="score at most N (a benchmark)")
+    ap.add_argument("--src", default=None,
+                    help="jsonl with a \"fen\" per line (default: positions.jsonl). "
+                         "Used to score positions that did not occur in the games, "
+                         "e.g. those a screened parameter setting moves into.")
     args = ap.parse_args()
 
-    src = os.path.join(args.dir, "positions.jsonl")
+    src = args.src or os.path.join(args.dir, "positions.jsonl")
     out = os.path.join(args.dir, f"sf{args.depth}.jsonl")
 
     fens, seen = [], set()
