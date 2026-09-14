@@ -46,3 +46,6 @@ flamegraph.svg
 
 ### Criterion benchmark output ###
 criterion/
+
+### Python bytecode from analysis/
+__pycache__/
