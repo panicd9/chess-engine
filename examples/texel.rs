@@ -42,6 +42,8 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("QueenMobility", weights::get(&weights::QUEEN_MOBILITY), 0, 30),
         ("KingShield", weights::get(&weights::MISSING_SHIELD_PAWN), 0, 100),
         ("PassedPawnScale", weights::get(&weights::PASSED_PAWN_SCALE), 0, 400),
+        ("DoubledPawn", weights::get(&weights::DOUBLED_PAWN), 0, 100),
+        ("IsolatedHalfOpenPawn", weights::get(&weights::ISOLATED_HALF_OPEN_PAWN), 0, 100),
     ]
 }
 
@@ -202,7 +204,24 @@ fn main() {
         .unwrap_or(usize::MAX);
     let files: Vec<&String> = args.iter().filter(|a| a.parse::<usize>().is_err()).collect();
 
-    let spec = spec();
+    // `only=A,B` tunes just those weights and pins the rest at their live values.
+    // Without it, adding a term and refitting moves the weights already adopted,
+    // so an A/B of "the new terms" would really be an A/B of eight changes.
+    let only: Option<Vec<String>> = files
+        .iter()
+        .find(|a| a.starts_with("only="))
+        .map(|a| a["only=".len()..].split(',').map(|s| s.to_ascii_lowercase()).collect());
+    let files: Vec<&String> = files.into_iter().filter(|a| !a.starts_with("only=")).collect();
+    let spec: Vec<_> = spec()
+        .into_iter()
+        .filter(|(name, ..)| match &only {
+            Some(list) => list.contains(&name.to_ascii_lowercase()),
+            None => true,
+        })
+        .collect();
+    if let Some(list) = &only {
+        eprintln!("tuning only {} of the weights: {:?}", spec.len(), list);
+    }
     let names: Vec<&str> = spec.iter().map(|(n, ..)| *n).collect();
     let defaults: Vec<i32> = spec.iter().map(|(_, d, ..)| *d).collect();
 

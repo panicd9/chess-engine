@@ -101,13 +101,42 @@ fn record_miss() {
 /// which is enough for one to look significant by chance.
 const PASSED_PAWN_BY_RANK: [i32; 8] = [0, 3, 5, 10, 20, 35, 60, 0];
 
-/// Identify a pawn structure, together with the weight it will be scored with.
+/// Every weight the cached score depends on. Read once per probe and folded
+/// into the key, so changing one by `setoption` -- which `examples/texel` does in
+/// a loop -- cannot serve a score fitted with the previous value.
+#[derive(Clone, Copy, PartialEq)]
+struct PawnWeights {
+    passed_scale: i32,
+    doubled: i32,
+    isolated_half_open: i32,
+}
+
+impl PawnWeights {
+    #[inline]
+    fn current() -> Self {
+        PawnWeights {
+            passed_scale: weights::get(&weights::PASSED_PAWN_SCALE),
+            doubled: weights::get(&weights::DOUBLED_PAWN),
+            isolated_half_open: weights::get(&weights::ISOLATED_HALF_OPEN_PAWN),
+        }
+    }
+
+    #[inline]
+    fn mix(self) -> u64 {
+        (self.passed_scale as u64)
+            .wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            ^ (self.doubled as u64).wrapping_mul(0xA0761D6478BD642F)
+            ^ (self.isolated_half_open as u64).wrapping_mul(0xE7037ED1A0B428DB)
+    }
+}
+
+/// Identify a pawn structure, together with the weights it will be scored with.
 ///
 /// Bit 0 is forced set so that no real key can be zero, which is what an unused
 /// slot holds; the index is taken from the high bits so that forcing a low bit
 /// does not halve the table.
 #[inline]
-fn key(white_pawns: u64, black_pawns: u64, scale: i32) -> u64 {
+fn key(white_pawns: u64, black_pawns: u64, w: PawnWeights) -> u64 {
     let mut x = white_pawns.wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ black_pawns
             .rotate_left(32)
@@ -117,7 +146,7 @@ fn key(white_pawns: u64, black_pawns: u64, scale: i32) -> u64 {
     x ^= x >> 27;
     x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
     x ^= x >> 31;
-    (x ^ (scale as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93)) | 1
+    (x ^ w.mix()) | 1
 }
 
 /// The pawn-only evaluation, from white's point of view.
@@ -127,8 +156,8 @@ fn key(white_pawns: u64, black_pawns: u64, scale: i32) -> u64 {
 /// reads the king squares and the heavy material left on the board, so it is not
 /// a function of the pawn structure alone.
 pub fn passed_pawns(cb: &Chessboard) -> i32 {
-    let scale = weights::get(&weights::PASSED_PAWN_SCALE);
-    let k = key(cb.white_pawns, cb.black_pawns, scale);
+    let w = PawnWeights::current();
+    let k = key(cb.white_pawns, cb.black_pawns, w);
     let index = (k >> 32) as usize & MASK;
 
     TABLE.with(|table| {
@@ -139,7 +168,7 @@ pub fn passed_pawns(cb: &Chessboard) -> i32 {
             return entry.score;
         }
         record_miss();
-        let score = compute(cb.white_pawns, cb.black_pawns, scale);
+        let score = compute(cb.white_pawns, cb.black_pawns, w);
         slot.set(Entry { key: k, score });
         score
     })
@@ -147,8 +176,9 @@ pub fn passed_pawns(cb: &Chessboard) -> i32 {
 
 /// A pawn is passed when no enemy pawn stands on its file or either adjacent
 /// file anywhere ahead of it, so nothing can block or capture it on the way.
-fn compute(white_pawns: u64, black_pawns: u64, scale: i32) -> i32 {
-    let mut score = 0;
+fn compute(white_pawns: u64, black_pawns: u64, w: PawnWeights) -> i32 {
+    let scale = w.passed_scale;
+    let mut score = structure(black_pawns, white_pawns, w) - structure(white_pawns, black_pawns, w);
 
     let mut pawns = white_pawns;
     while pawns != 0 {
@@ -171,6 +201,51 @@ fn compute(white_pawns: u64, black_pawns: u64, scale: i32) -> i32 {
     }
 
     score
+}
+
+/// Structural penalties for one side, as a positive number to be subtracted.
+///
+/// **Doubled**: every pawn beyond the first on a file. **Isolated on a half-open
+/// file**: a pawn with no friendly pawn on either neighbouring file, on a file no
+/// enemy pawn stands on. The split matters -- plain isolation measured *harmless*
+/// (a positive coefficient); the damage is the half-open file, where no pawn can
+/// ever defend it and an enemy rook already bears on it.
+fn structure(pawns: u64, enemy: u64, w: PawnWeights) -> i32 {
+    if w.doubled == 0 && w.isolated_half_open == 0 {
+        return 0;
+    }
+    let mut penalty = 0;
+    for file in 0..8 {
+        let mask = FILE_MASKS[file];
+        let count = (pawns & mask).count_ones() as i32;
+        if count == 0 {
+            continue;
+        }
+        penalty += (count - 1) * w.doubled;
+        let mut neighbours = 0u64;
+        if file > 0 {
+            neighbours |= FILE_MASKS[file - 1];
+        }
+        if file < 7 {
+            neighbours |= FILE_MASKS[file + 1];
+        }
+        if pawns & neighbours == 0 && enemy & mask == 0 {
+            penalty += count * w.isolated_half_open;
+        }
+    }
+    penalty
+}
+
+/// The counts the two structural weights multiply, white minus black. Used to
+/// prove the Rust agrees with `analysis/features.py`, which is what the fitted
+/// weights were fitted against.
+pub fn structure_counts(cb: &Chessboard) -> (i32, i32) {
+    let one = PawnWeights { passed_scale: 0, doubled: 1, isolated_half_open: 0 };
+    let two = PawnWeights { passed_scale: 0, doubled: 0, isolated_half_open: 1 };
+    (
+        structure(cb.white_pawns, cb.black_pawns, one) - structure(cb.black_pawns, cb.white_pawns, one),
+        structure(cb.white_pawns, cb.black_pawns, two) - structure(cb.black_pawns, cb.white_pawns, two),
+    )
 }
 
 /// The squares an enemy pawn would have to occupy to stop this one: the pawn's
@@ -198,9 +273,5 @@ fn blocking_mask(square: usize, white: bool) -> u64 {
 
 /// The uncached value, for tests that need to prove the cache changes nothing.
 pub fn uncached(cb: &Chessboard) -> i32 {
-    compute(
-        cb.white_pawns,
-        cb.black_pawns,
-        weights::get(&weights::PASSED_PAWN_SCALE),
-    )
+    compute(cb.white_pawns, cb.black_pawns, PawnWeights::current())
 }

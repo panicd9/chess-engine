@@ -310,6 +310,11 @@ pub fn run() -> io::Result<()> {
                     ("QueenMobility", 3, 0, 30),
                     ("KingShield", 5, 0, 100),
                     ("PassedPawnScale", 84, 0, 400),
+                    // Default 0: the terms are computed either way, so one
+                    // binary A/Bs them with a single setoption and neither side
+                    // carries a speed advantage.
+                    ("DoubledPawn", 0, 0, 100),
+                    ("IsolatedHalfOpenPawn", 0, 0, 100),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }

@@ -52,6 +52,23 @@ pub mod weights {
     /// front of its king that are worth more elsewhere.
     pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(5);
 
+    /// Penalty per pawn beyond the first on a file, and per isolated pawn on a
+    /// file with no enemy pawn.
+    ///
+    /// **Both default to 0, and the work is done regardless of their value**, so
+    /// one binary A/Bs them with a single `setoption` and there is no speed
+    /// confound between the two sides -- the pattern that made the 2026-09-12
+    /// test clean. They were fitted at 25 and 19 then, measured +3.8 +/- 17.4
+    /// over 1000 games, and reverted: an interval that wide could not show a real
+    /// effect, and the terms cost 10-12% of `evaluate()` uncached. They now live
+    /// behind `crate::pawn_hash`, which computes them only on a miss.
+    ///
+    /// They are the two features that survive a change of corpus: top-ranked
+    /// against both zurichess `quiet-labeled` and our own game positions, at both
+    /// oracle depths. Nothing else in that study does.
+    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(0);
+    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(0);
+
     /// Scales the passed pawn bonus, as a percentage. 100 leaves the by-rank
     /// table below unchanged.
     ///
@@ -72,6 +89,8 @@ pub mod weights {
             "queenmobility" => &QUEEN_MOBILITY,
             "kingshield" => &MISSING_SHIELD_PAWN,
             "passedpawnscale" => &PASSED_PAWN_SCALE,
+            "doubledpawn" => &DOUBLED_PAWN,
+            "isolatedhalfopenpawn" => &ISOLATED_HALF_OPEN_PAWN,
             _ => return false,
         };
         target.store(value, Ordering::Relaxed);
