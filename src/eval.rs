@@ -55,19 +55,30 @@ pub mod weights {
     /// Penalty per pawn beyond the first on a file, and per isolated pawn on a
     /// file with no enemy pawn.
     ///
-    /// **Both default to 0, and the work is done regardless of their value**, so
-    /// one binary A/Bs them with a single `setoption` and there is no speed
-    /// confound between the two sides -- the pattern that made the 2026-09-12
-    /// test clean. They were fitted at 25 and 19 then, measured +3.8 +/- 17.4
-    /// over 1000 games, and reverted: an interval that wide could not show a real
-    /// effect, and the terms cost 10-12% of `evaluate()` uncached. They now live
-    /// behind `crate::pawn_hash`, which computes them only on a miss.
+    /// **Measured, at two time controls, against the same engine with both at 0:**
+    ///
+    /// ```text
+    /// 10+0.1   1812 games   depth ~10    +31.0 +/- 12.6
+    /// 40+0.4    700 games   depth ~11.8  +36.4 +/- 19.1
+    /// ```
+    ///
+    /// Fitted by `examples/texel` against game results, cross-validated each way
+    /// over big3 and quiet-labeled (19/14 and 16/10; these are the consensus).
+    /// The short-control run was stopped early on a favourable reading, so its
+    /// magnitude is biased upward; the sign is not in doubt at either control.
+    ///
+    /// They were tried once before at 25 and 19, read off a regression against
+    /// Stockfish's evaluation, and measured +3.8 +/- 17.4 at identical conditions
+    /// -- a difference of +27 +/- 22 from this. Two things changed: the weights
+    /// now come from game results, and the terms live behind `crate::pawn_hash`,
+    /// which computes them only on a miss instead of costing 10-12% of
+    /// `evaluate()`. Do not adjust one by eye.
     ///
     /// They are the two features that survive a change of corpus: top-ranked
     /// against both zurichess `quiet-labeled` and our own game positions, at both
     /// oracle depths. Nothing else in that study does.
-    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(0);
-    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(0);
+    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(18);
+    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(12);
 
     /// Scales the passed pawn bonus, as a percentage. 100 leaves the by-rank
     /// table below unchanged.
