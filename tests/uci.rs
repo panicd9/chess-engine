@@ -296,6 +296,51 @@ fn tiny_movetime_is_still_honoured() {
     );
 }
 
+/// The pacing factors scale the *soft* bound only. Whatever they compute, a
+/// search may never run past the hard bound -- so an explicit `movetime`, where
+/// the two bounds coincide, must be honoured exactly as it was before they
+/// existed. Set both factors to their maximum to make them push as hard as they
+/// can.
+#[test]
+fn pacing_factors_never_overrun_the_hard_bound() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Instability Gain value 200");
+    engine.send("setoption name Panic Scale value 200");
+    for budget in [100u128, 200, 400] {
+        let started = Instant::now();
+        let (mv, _) = engine.bestmove(
+            "position startpos moves e2e4 e7e5 g1f3 b8c6 f1b5",
+            &format!("go movetime {budget}"),
+        );
+        let elapsed = started.elapsed().as_millis();
+        assert_eq!(mv.len(), 4);
+        assert!(
+            elapsed < budget + 120,
+            "movetime {budget} took {elapsed}ms with the pacing factors at maximum"
+        );
+    }
+}
+
+/// With both factors off the engine must pace exactly as it did before they
+/// were added, so that turning them off in a match is a true baseline.
+#[test]
+fn pacing_factors_can_be_turned_off() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Instability Gain value 0");
+    engine.send("setoption name Panic Scale value 0");
+    let (mv, lines) = engine.bestmove(
+        "position startpos moves e2e4 e7e5 g1f3 b8c6",
+        "go wtime 3000 btime 3000",
+    );
+    assert_eq!(mv.len(), 4);
+    assert!(
+        lines.iter().any(|l| l.starts_with("info depth")),
+        "no completed iteration with the factors off: {lines:?}"
+    );
+}
+
 #[test]
 fn understands_fen_and_move_lists() {
     let mut engine = Engine::start();
