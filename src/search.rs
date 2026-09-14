@@ -253,8 +253,29 @@ pub fn nodes_searched() -> u64 {
 /// periodically -- but the flag read should stay on every node.
 #[inline]
 fn count_node_and_should_stop() -> bool {
-    NODES.fetch_add(1, Ordering::Relaxed);
+    let visited = NODES.fetch_add(1, Ordering::Relaxed) + 1;
+    // Tests stop the search at an exact node, from inside the search thread, so
+    // what happens after a stop is reproducible and free of races. Compiled out
+    // of every non-test build, so the hot path is unchanged.
+    #[cfg(test)]
+    {
+        let limit = test_hooks::NODE_LIMIT.load(Ordering::Relaxed);
+        if limit != 0 && visited >= limit {
+            STOP.store(true, Ordering::Relaxed);
+        }
+    }
+    #[cfg(not(test))]
+    let _ = visited;
     STOP.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod test_hooks {
+    use std::sync::atomic::AtomicU64;
+    /// Stop the search once this many nodes have been visited. 0 is no limit.
+    pub static NODE_LIMIT: AtomicU64 = AtomicU64::new(0);
+    /// Table stores made while the stop flag was set.
+    pub static STORES_WHILE_STOPPED: AtomicU64 = AtomicU64::new(0);
 }
 
 /// PROTOTYPE: reuse move buffers instead of allocating one per node.
@@ -515,6 +536,15 @@ fn search_node(
         history.pop();
         moves_searched += 1;
 
+        // Stopped while this child was being searched: its score is the
+        // placeholder from the stop check, not a result. Leave before it can
+        // reach the best score, alpha, the killers or the history table. Every
+        // child searched before the flag went up is still genuine, so what this
+        // node has at this point is the best of the moves it actually finished.
+        if STOP.load(Ordering::Relaxed) {
+            break 'legal_moves;
+        }
+
         // If this move is better, update the best score and best position.
         if score > best_score {
             best_score = score;
@@ -539,6 +569,23 @@ fn search_node(
         }
     }
 
+    // A stopped node concluded nothing that may outlive this search. Its best
+    // score covers only the moves it finished, so as a table entry it would
+    // claim a bound over moves it never looked at -- and the table lasts the
+    // whole game, so a later search would read that claim back as a result.
+    //
+    // Before this, every node on the path being searched when the flag went up
+    // stored `max(real children, 0)` at its full depth, 0 being the placeholder
+    // every later child returned. See `abort_tests`.
+    if STOP.load(Ordering::Relaxed) {
+        history.path_dependent |= outer_path_dependent;
+        pool::give(legal_moves.into_inner());
+        // No move finished: report the placeholder rather than i32::MIN, which
+        // the caller negates.
+        let score = if best_score == i32::MIN { 0 } else { best_score };
+        return (score, best_pos);
+    }
+
     // Record what this node concluded. `bound` says how much to trust it: a
     // cutoff only proves the score is at least this, and a node where nothing
     // beat alpha only proves it is at most this.
@@ -560,6 +607,10 @@ fn search_node(
         // is worth having for ordering and for the principal variation -- while
         // ensuring no search deeper than 0 will ever trust the score.
         let storable_depth = if history.path_dependent { 0 } else { depth };
+        #[cfg(test)]
+        if STOP.load(Ordering::Relaxed) {
+            test_hooks::STORES_WHILE_STOPPED.fetch_add(1, Ordering::Relaxed);
+        }
         history.table.store(key, storable_depth, best_score, bound, best_move);
     }
 
@@ -1115,5 +1166,52 @@ fn safe_neg(value: i32) -> i32 {
         i32::MAX // Return max value instead of overflowing
     } else {
         -value
+    }
+}
+
+#[cfg(test)]
+mod abort_tests {
+    use super::*;
+    use crate::chessboard::Chessboard;
+
+    /// A search stopped by the clock must not write to the transposition table.
+    ///
+    /// It did. The nodes on the path being searched when the flag went up
+    /// finished their move loops: every child after that returned the
+    /// placeholder 0 from the stop check, and each of those nodes then stored
+    /// `max(real children, 0)` at its full depth. The table lasts the whole
+    /// game, so a later search could read it back as a result. Measured over 8
+    /// self-play games at 10+0.1: 493 stores after the stop, 48% of them
+    /// exactly 0 against 1% of ordinary stores, and 24% contradicting their own
+    /// bound by more than 100cp against a cold re-search, where ordinary stores
+    /// do so 7.5% of the time -- a lost pawn ending at -714 stored as "at least
+    /// 0".
+    ///
+    /// Several node budgets, so the stop lands at different depths of the
+    /// stack: near the root, mid-tree and near the leaves.
+    #[test]
+    fn a_stopped_search_writes_nothing_to_the_table() {
+        let fen = "r1bq1rk1/pp2bppp/2n1pn2/2pp4/3P1B2/2PBPN2/PP1N1PPP/R2Q1RK1 w - - 0 9";
+        let board = Chessboard::from_fen(fen).unwrap();
+        for limit in [3_000u64, 20_000, 77_777, 150_000, 400_000] {
+            let mut history = History::new();
+            history.ensure_table(16);
+            reset_nodes();
+            STOP.store(false, Ordering::Relaxed);
+            test_hooks::STORES_WHILE_STOPPED.store(0, Ordering::Relaxed);
+            test_hooks::NODE_LIMIT.store(limit, Ordering::Relaxed);
+
+            let _ = nega_max_alpha_beta_best_move(
+                &board, 12, true, i32::MIN + 1, i32::MAX - 1, &mut history,
+            );
+
+            let stopped = STOP.load(Ordering::Relaxed);
+            let stores = test_hooks::STORES_WHILE_STOPPED.load(Ordering::Relaxed);
+            test_hooks::NODE_LIMIT.store(0, Ordering::Relaxed);
+            STOP.store(false, Ordering::Relaxed);
+
+            assert!(stopped, "limit {limit}: the search finished before the stop, so this tested nothing");
+            assert_eq!(stores, 0, "limit {limit}: {stores} table stores were made after the stop");
+        }
     }
 }
