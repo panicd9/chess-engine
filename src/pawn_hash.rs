@@ -51,7 +51,18 @@ const EMPTY: Cell<Entry> = Cell::new(Entry { key: 0, score: 0 });
 thread_local! {
     /// Per thread, so this stays correct if the search is ever parallelised --
     /// unlike a global, which would need synchronising on the hot path.
-    static TABLE: [Cell<Entry>; SIZE] = [EMPTY; SIZE];
+    //
+    // `const`, and it matters far more than it looks. With the lazy initializer
+    // `= [EMPTY; SIZE]` the engine searched 46% slower: identical node counts,
+    // 1.46x the time, on 24 of 24 positions. With `const` it is 0.98x of the
+    // uncached engine, which is the gain the cache promised. Why the lazy form
+    // costs this much is not established -- only that this one word removes it.
+    //
+    // It went unseen because it was timed through the library, on the main
+    // thread (`examples/bench_all`, `examples/pawnprobe`). The engine searches on
+    // a freshly spawned thread (`uci.rs`), and that is where it cost 1.46x. Time
+    // speed changes through the UCI binary.
+    static TABLE: [Cell<Entry>; SIZE] = const { [EMPTY; SIZE] };
 }
 
 /// Hit/miss counting, off unless the `pawnstats` feature is on: a thread-local
