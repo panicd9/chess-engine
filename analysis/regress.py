@@ -64,7 +64,7 @@ def solve(a, b):
     return solution, inverse
 
 
-def load_quiet(directory, sf_file, decided, only=None):
+def load_quiet(directory, sf_file, decided, only=None, assume_resolved=False):
     """`only` pins the position set, so two oracle depths can be compared on
     exactly the same positions rather than on whatever each one's filter keeps."""
     rows = []
@@ -78,12 +78,13 @@ def load_quiet(directory, sf_file, decided, only=None):
             continue
         if abs(r["sf_cp"]) > decided:
             continue
-        board = chess.Board(r["fen"])
-        if board.is_check():
-            continue
-        best = r.get("sf_best")
-        if best and board.is_capture(chess.Move.from_uci(best)):
-            continue                      # not resolved: quiescence would go on
+        if not assume_resolved:
+            board = chess.Board(r["fen"])
+            if board.is_check():
+                continue
+            best = r.get("sf_best")
+            if best and board.is_capture(chess.Move.from_uci(best)):
+                continue                  # not resolved: quiescence would go on
         rows.append((r["fen"], float(r["sf_cp"])))
     return rows
 
@@ -115,8 +116,9 @@ def fit(rows, weights=()):
     tss = sum((v - mean_y) ** 2 for v in y)
     sigma2 = rss / (n - p)
     se = [math.sqrt(max(sigma2 * inv[i][i], 0.0)) for i in range(p)]
-    sd = [math.sqrt(sum((X[r][i] - sum(X[q][i] for q in range(n)) / n) ** 2
-                        for r in range(n)) / n) for i in range(p)]
+    means = [sum(X[r][i] for r in range(n)) / n for i in range(p)]
+    sd = [math.sqrt(sum((X[r][i] - means[i]) ** 2 for r in range(n)) / n)
+          for i in range(p)]
     return {"n": n, "beta": beta, "se": se, "sd": sd, "r2": 1 - rss / tss}
 
 
@@ -138,6 +140,9 @@ def main():
     ap.add_argument("--dir", default=DEFAULT_DIR)
     ap.add_argument("--sf", default="sf22.jsonl")
     ap.add_argument("--decided", type=int, default=600)
+    ap.add_argument("--assume-resolved", action="store_true",
+                    help="corpus is already quiescence-resolved (the public sets "
+                         "are): keep the |sf| filter, skip the check/capture one")
     ap.add_argument("--fens", default=None,
                     help="file of FENs to pin the position set (skips the quiet filter)")
     ap.add_argument("--knockout", default="PassedPawnScale=0",
@@ -147,7 +152,7 @@ def main():
     only = None
     if args.fens:
         only = {l.strip() for l in open(args.fens) if l.strip()}
-    rows = load_quiet(args.dir, args.sf, args.decided, only)
+    rows = load_quiet(args.dir, args.sf, args.decided, only, args.assume_resolved)
     print(f"{len(rows)} quiet positions from {args.sf}")
     base = report(fit(rows), f"BASELINE ({args.sf})")
 
