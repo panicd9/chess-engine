@@ -84,19 +84,8 @@ pub mod weights {
     }
 }
 
-/// Bonus for a passed pawn, by the rank it has reached (from its own side's
-/// point of view). Scaled by `weights::PASSED_PAWN_SCALE`.
-///
-/// These are half the values originally guessed at. Doubling them measured
-/// clearly worse (-53 Elo), so the first set was too generous. Halving looked
-/// like a gain in a 160-game run but did not reproduce over 240 games at a
-/// longer control (0.0 +/- 38), so treat this as "no worse, and safer" rather
-/// than a tuned improvement. Ten candidates were tested at +/-50 error bars,
-/// which is enough for one to look significant by chance.
-const PASSED_PAWN_BY_RANK: [i32; 8] = [0, 3, 5, 10, 20, 35, 60, 0];
-
 pub fn evaluate(cb: &Chessboard) -> i32 {
-    eval(&cb.piece_square, &EVAL_TABLES) + mobility(cb) + king_safety(cb) + passed_pawns(cb)
+    eval(&cb.piece_square, &EVAL_TABLES) + mobility(cb) + king_safety(cb) + crate::pawn_hash::passed_pawns(cb)
 }
 
 /// Squares attacked by each side's pieces, weighted by piece type.
@@ -163,54 +152,3 @@ fn king_safety(cb: &Chessboard) -> i32 {
     white - black
 }
 
-/// A pawn is passed when no enemy pawn stands on its file or either adjacent
-/// file anywhere ahead of it, so nothing can block or capture it on the way.
-fn passed_pawns(cb: &Chessboard) -> i32 {
-    let mut score = 0;
-    let scale = weights::get(&weights::PASSED_PAWN_SCALE);
-
-    let mut pawns = cb.white_pawns;
-    while pawns != 0 {
-        let square = pawns.trailing_zeros() as usize;
-        pawns &= pawns - 1;
-        let rank = square / 8;
-        if rank < 7 && (cb.black_pawns & blocking_mask(square, true)) == 0 {
-            score += PASSED_PAWN_BY_RANK[rank] * scale / 100;
-        }
-    }
-
-    let mut pawns = cb.black_pawns;
-    while pawns != 0 {
-        let square = pawns.trailing_zeros() as usize;
-        pawns &= pawns - 1;
-        let rank = square / 8;
-        if rank > 0 && (cb.white_pawns & blocking_mask(square, false)) == 0 {
-            score -= PASSED_PAWN_BY_RANK[7 - rank] * scale / 100;
-        }
-    }
-
-    score
-}
-
-/// The squares an enemy pawn would have to occupy to stop this one: the pawn's
-/// own file plus its neighbours, on every rank ahead of it.
-fn blocking_mask(square: usize, white: bool) -> u64 {
-    let file = square % 8;
-    let rank = square / 8;
-
-    let mut files = FILE_MASKS[file];
-    if file > 0 {
-        files |= FILE_MASKS[file - 1];
-    }
-    if file < 7 {
-        files |= FILE_MASKS[file + 1];
-    }
-
-    let ahead = if white {
-        u64::MAX << ((rank + 1) * 8)
-    } else {
-        u64::MAX >> ((8 - rank) * 8)
-    };
-
-    files & ahead
-}

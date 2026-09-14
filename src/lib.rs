@@ -15,6 +15,7 @@ pub mod move_list;
 pub mod move_ordering;
 pub mod notation;
 pub mod uci;
+pub mod pawn_hash;
 pub mod zobrist;
 pub mod tt;
 pub mod see;
