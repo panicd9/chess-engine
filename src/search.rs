@@ -85,6 +85,16 @@ pub struct History {
     /// What earlier searches -- including shallower iterative-deepening
     /// iterations -- concluded about positions seen along the way.
     pub table: TranspositionTable,
+    /// Zobrist keys of the positions reached by root moves whose search ran to
+    /// completion in the current iteration, in the order they finished. The
+    /// driver clears it before each root search.
+    ///
+    /// A search the clock stops part-way is normally discarded whole. That is
+    /// right for the moves it did not finish, but the root's *finished* moves
+    /// carry genuine scores at this iteration's depth, and throwing them away
+    /// throws away the most expensive work of the move. This is what lets the
+    /// driver tell which of them it may trust.
+    pub root_completed: Vec<u64>,
     /// Set while the score currently being computed depends on the moves played
     /// to reach it rather than on the position alone. See [`History::table`].
     path_dependent: bool,
@@ -93,6 +103,19 @@ pub struct History {
     /// tests that call the search directly print nothing. See
     /// [`ROOT_MOVE_OUTPUT_NODES`].
     pub announce_root_moves: bool,
+    /// The score the previous `go` settled on, from the side to move's point of
+    /// view at that move. Time management compares the current score against it
+    /// to notice a position going wrong -- see `uci::Pacing`. `None` at the
+    /// start of a game and after `ucinewgame`.
+    ///
+    /// It lives here because `History` is what survives from one `go` to the
+    /// next: the worker thread hands it back and `stop_search` takes it.
+    pub previous_move_score: Option<i32>,
+    /// The stability factor the previous `go` ended on, in percent. Carrying it
+    /// forward is what turns time saved on a settled move into time spent on the
+    /// next one -- Stockfish's `previousTimeReduction`. `None` at the start of a
+    /// game and after `ucinewgame`.
+    pub previous_time_reduction: Option<u64>,
 }
 
 impl Default for History {
@@ -110,8 +133,11 @@ impl History {
             // Left empty so cloning a game history stays cheap; the search
             // driver sizes it once before searching.
             table: TranspositionTable::new(0),
+            root_completed: Vec::with_capacity(64),
             path_dependent: false,
             announce_root_moves: false,
+            previous_move_score: None,
+            previous_time_reduction: None,
         }
     }
 
@@ -153,6 +179,8 @@ impl History {
         }
         self.table.clear();
         self.path_dependent = false;
+        self.previous_move_score = None;
+        self.previous_time_reduction = None;
     }
 
     /// Remember a quiet move that caused a cutoff at this ply.
@@ -597,6 +625,9 @@ fn search_node(
         // node has at this point is the best of the moves it actually finished.
         if STOP.load(Ordering::Relaxed) {
             break 'legal_moves;
+        }
+        if ply == 0 {
+            history.root_completed.push(zobrist::hash(&pos));
         }
 
         // If this move is better, update the best score and best position.
