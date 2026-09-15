@@ -6,7 +6,7 @@
 //! [`search::STOP`] and let the worker unwind.
 
 use std::io::{self, BufRead, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,6 +20,18 @@ use crate::search::{self, History, nega_max_alpha_beta_best_move};
 /// the ponder search converts into a normal timed one, keeping everything it
 /// has already computed.
 static PONDER_HIT: AtomicBool = AtomicBool::new(false);
+
+/// How far into the search `ponderhit` arrived, in milliseconds, or `NO_HIT`
+/// while the opponent has not played our prediction.
+///
+/// The soft bound is a share of *our* clock, and our clock only starts running
+/// at the hit -- so the deepening loop has to measure from there, not from the
+/// start of a search that spent most of its time on the opponent's clock. The
+/// watchdog thread records it because it already polls for the hit every 2ms;
+/// the loop itself only looks between iterations, which are the very thing the
+/// soft bound decides whether to start.
+static PONDER_HIT_AT_MS: AtomicU64 = AtomicU64::new(NO_HIT);
+const NO_HIT: u64 = u64::MAX;
 
 const NAME: &str = concat!("chess-engine ", env!("CARGO_PKG_VERSION"));
 const AUTHOR: &str = "Darko Panic";
@@ -761,6 +773,7 @@ pub fn run() -> io::Result<()> {
             "go" => {
                 stop_search(&mut worker, &mut history);
                 PONDER_HIT.store(false, Ordering::Relaxed);
+                PONDER_HIT_AT_MS.store(NO_HIT, Ordering::Relaxed);
                 let limits = parse_go(&line);
                 // Lend the search everything we have, including the table, and
                 // take it back when it finishes. Every command that reads
@@ -857,6 +870,8 @@ fn search_and_report(
                         return; // `stop` arrived: the search ends on its own.
                     }
                     if PONDER_HIT.load(Ordering::Relaxed) {
+                        PONDER_HIT_AT_MS
+                            .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
                         break;
                     }
                     match done_rx.recv_timeout(Duration::from_millis(2)) {
@@ -1002,7 +1017,21 @@ fn search_and_report(
         // has bounds but no deadline: it is on the opponent's clock, so nothing
         // limits it until `ponderhit`, after which the watchdog counts from the
         // hit and this loop has no way to measure from there.
-        if deadline.is_some() {
+        // What the soft bound is measured against. A plain search: the time
+        // since it began. A ponder search: nothing until the hit, because until
+        // then we are spending the opponent's clock and there is no reason to
+        // stop -- and from the hit onwards, the time since the hit.
+        let spent = if pondering {
+            match PONDER_HIT_AT_MS.load(Ordering::Relaxed) {
+                NO_HIT => None,
+                hit_ms => Some(started.elapsed().saturating_sub(Duration::from_millis(hit_ms))),
+            }
+        } else if deadline.is_some() {
+            Some(started.elapsed())
+        } else {
+            None
+        };
+        if let Some(spent) = spent {
             if let Some(budget) = budget {
                 // Spend unevenly: an unsettled root move or a score that is
                 // falling earns more of the clock, a settled one less. This only
@@ -1013,7 +1042,7 @@ fn search_and_report(
                     pacing.scale_percent(previous_move_score, previous_reduction, depth, &options);
                 let want = (budget.optimum.as_millis() as u64 * scale / 100).max(1);
                 let soft = Duration::from_millis(want).min(budget.maximum);
-                if started.elapsed() >= soft {
+                if spent >= soft {
                     break;
                 }
             }

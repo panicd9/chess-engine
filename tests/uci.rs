@@ -580,6 +580,51 @@ fn ponderhit_starts_the_clock() {
     );
 }
 
+/// After `ponderhit` the soft bound still applies, measured from the hit.
+///
+/// It did not: the deepening loop guarded the soft bound on `deadline`, which a
+/// ponder search never has, so once the hit arrived nothing stopped it starting
+/// another iteration and it ran to the *hard* bound every time. Measured over
+/// the bot's own games, a move that was pondered and hit cost 2.1x the clock of
+/// a plain move (8.72s against 4.06s at a 30-60s clock) for the same median
+/// depth. No A/B could see it: cutechess does not ponder unless told to, so
+/// every match that set the bounds was played without a single hit.
+///
+/// `Max Scale 1000` separates the two bounds by 10x so the difference is far
+/// larger than one iteration of slack. The lower bound matters too: measuring
+/// from the start of the search rather than from the hit would make a pondered
+/// move answer instantly, giving away the clock instead of overspending it.
+#[test]
+fn ponderhit_keeps_the_soft_bound() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Move Overhead value 30");
+    engine.send("setoption name Max Scale value 1000");
+    engine.send("position startpos");
+    engine.send("go ponder wtime 60000 btime 60000");
+    // Long enough to be several iterations in, short enough that the iteration
+    // still in flight at the hit is a fraction of a second.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    let elapsed = started.elapsed().as_millis();
+
+    let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+    assert_eq!(mv.len(), 4);
+    // A 60s clock gives a soft bound near 0.9s and a hard bound near 7.3s here.
+    assert!(
+        elapsed < 3500,
+        "took {elapsed}ms after ponderhit, which is the hard bound, not the soft one"
+    );
+    assert!(
+        elapsed > 150,
+        "answered after {elapsed}ms: the budget is being measured from the start \
+         of the ponder search rather than from the hit"
+    );
+}
+
 /// The `ponder` token must be the reply from the PV of the last completed
 /// iteration, not whatever the table holds once the search has finished.
 ///
