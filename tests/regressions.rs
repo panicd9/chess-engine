@@ -564,6 +564,8 @@ fn evaluation_is_colour_symmetric() {
         // Knights on the second and seventh ranks, where the knight table once
         // counted each knight's own square for white alone.
         "r1bqkb1r/pppnnppp/8/8/8/8/PPPNNPPP/R1BQKB1R w KQkq - 0 1",
+        // From gCd8UcfI: mirrored, black's knight lands on d2.
+        "5R2/3N4/1P1P2pp/2p3k1/K1Pn1p2/1r6/8/8 w - - 2 53",
     ] {
         let a = Chessboard::from_fen(fen).unwrap();
         let m = mirror(fen);
