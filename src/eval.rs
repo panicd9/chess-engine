@@ -116,6 +116,17 @@ pub mod weights {
     /// it did in the six-weight fit, so it stays. Against the term switched off,
     /// these values cut the error by 0.85% on big3 and 2.5% on quiet-labeled,
     /// and by the same amounts on each as the held-out set.
+    ///
+    /// **Measured against the same binary with these four at 0:**
+    ///
+    /// ```text
+    /// 10+0.1   355 games   SPRT [0,15] accepted   +52.3 +/- 28.4
+    /// 40+0.4   254 games   depth ~12.4            +72.1 +/- 32.1
+    /// ```
+    ///
+    /// Both runs stopped early -- the first by its SPRT, the second on a
+    /// favourable reading of a planned 800 -- so the magnitudes lean high. The
+    /// sign is not in doubt at either control.
     pub static PASSED_KING_THEM: AtomicI32 = AtomicI32::new(8);
     pub static PASSED_KING_US: AtomicI32 = AtomicI32::new(2);
     pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(23);
