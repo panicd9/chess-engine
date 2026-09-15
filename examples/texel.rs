@@ -44,6 +44,10 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("PassedPawnScale", weights::get(&weights::PASSED_PAWN_SCALE), 0, 400),
         ("DoubledPawn", weights::get(&weights::DOUBLED_PAWN), 0, 100),
         ("IsolatedHalfOpenPawn", weights::get(&weights::ISOLATED_HALF_OPEN_PAWN), 0, 100),
+        ("PassedKingThem", weights::get(&weights::PASSED_KING_THEM), 0, 100),
+        ("PassedKingUs", weights::get(&weights::PASSED_KING_US), 0, 100),
+        ("PassedFreePath", weights::get(&weights::PASSED_FREE_PATH), 0, 200),
+        ("PassedPathOffset", weights::get(&weights::PASSED_PATH_OFFSET), 0, 41),
     ]
 }
 

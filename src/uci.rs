@@ -721,6 +721,12 @@ pub fn run() -> io::Result<()> {
                     // `eval::weights`. Must match the statics there.
                     ("DoubledPawn", 18, 0, 100),
                     ("IsolatedHalfOpenPawn", 12, 0, 100),
+                    // What the pieces let a passed pawn do; see
+                    // `eval::passed_pawn_pieces`. Must match the statics there.
+                    ("PassedKingThem", 8, 0, 100),
+                    ("PassedKingUs", 2, 0, 100),
+                    ("PassedFreePath", 23, 0, 200),
+                    ("PassedPathOffset", 17, 0, 41),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }
