@@ -561,6 +561,9 @@ fn evaluation_is_colour_symmetric() {
         "8/1P6/8/8/8/8/6p1/4K2k w - - 0 1",
         // Broken king shield.
         "r1bq1rk1/pp3ppp/2n5/8/8/2N5/PP3PPP/R1BQ1RK1 w - - 0 1",
+        // Knights on the second and seventh ranks, where the knight table once
+        // counted each knight's own square for white alone.
+        "r1bqkb1r/pppnnppp/8/8/8/8/PPPNNPPP/R1BQKB1R w KQkq - 0 1",
     ] {
         let a = Chessboard::from_fen(fen).unwrap();
         let m = mirror(fen);
