@@ -561,6 +561,9 @@ fn evaluation_is_colour_symmetric() {
         "8/1P6/8/8/8/8/6p1/4K2k w - - 0 1",
         // Broken king shield.
         "r1bq1rk1/pp3ppp/2n5/8/8/2N5/PP3PPP/R1BQ1RK1 w - - 0 1",
+        // Knights on the second and seventh ranks, where the knight table once
+        // counted each knight's own square for white alone.
+        "r1bqkb1r/pppnnppp/8/8/8/8/PPPNNPPP/R1BQKB1R w KQkq - 0 1",
     ] {
         let a = Chessboard::from_fen(fen).unwrap();
         let m = mirror(fen);
@@ -627,11 +630,41 @@ fn static_exchange_evaluation_is_correct() {
         ("4k3/4r3/8/4r3/8/8/4R3/4K3 w - - 0 1", 12, 36, 0, "Rxe5 Rxe5, even"),
         // Undefended piece is simply won.
         ("4k3/8/8/4n3/8/8/8/4R1K1 w - - 0 1", 4, 36, 320, "Rxe5 wins a knight"),
+        // The same, on e2. The knight table's c2..h2 entries once included the
+        // knight's own square, so a knight there counted as defending itself and
+        // this capture read as bishop-for-knight.
+        ("4k3/8/8/7b/8/8/4N3/K7 b - - 0 1", 39, 12, 320, "Bxe2 wins a knight"),
     ];
 
     for (fen, from, to, expected, what) in cases {
         let cb = Chessboard::from_fen(fen).unwrap();
         let got = see(&cb, *from, *to);
         assert_eq!(got, *expected, "{what} in {fen}: see said {got}, expected {expected}");
+    }
+}
+
+/// Every knight attack set must be exactly the up-to-eight squares a knight
+/// reaches, and never its own square. Move generation masks own-occupied
+/// squares, so perft passed for years with c2..h2 each including itself; the
+/// extra square leaked into mobility (a white knight on the second rank earned
+/// one square more than a black knight on the seventh) and into SEE, where the
+/// knight defended itself.
+#[test]
+fn knight_attack_table_is_exact() {
+    use chess_engine::move_gen::move_gen_knight::knight_attacks_from_single_knight_bitboard;
+    for square in 0..64i32 {
+        let (file, rank) = (square % 8, square / 8);
+        let mut expected = 0u64;
+        for (df, dr) in [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)] {
+            let (f, r) = (file + df, rank + dr);
+            if (0..8).contains(&f) && (0..8).contains(&r) {
+                expected |= 1u64 << (r * 8 + f);
+            }
+        }
+        assert_eq!(
+            knight_attacks_from_single_knight_bitboard(1u64 << square),
+            expected,
+            "knight attacks from square {square}"
+        );
     }
 }
