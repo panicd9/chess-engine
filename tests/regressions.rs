@@ -568,6 +568,8 @@ fn evaluation_is_colour_symmetric() {
         // 2qYroOWA), which is what `passed_pawn_pieces` reads.
         "8/1P1Pk3/2n4p/2p5/2P2p2/K2N4/8/8 w - - 1 56",
         "1Q6/3Pqpk1/6p1/8/7p/2P4P/3b1PP1/5K2 w - - 1 58",
+        // From gCd8UcfI: mirrored, black's knight lands on d2.
+        "5R2/3N4/1P1P2pp/2p3k1/K1Pn1p2/1r6/8/8 w - - 2 53",
     ] {
         let a = Chessboard::from_fen(fen).unwrap();
         let m = mirror(fen);
