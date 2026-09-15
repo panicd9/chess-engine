@@ -561,6 +561,10 @@ fn evaluation_is_colour_symmetric() {
         "8/1P6/8/8/8/8/6p1/4K2k w - - 0 1",
         // Broken king shield.
         "r1bq1rk1/pp3ppp/2n5/8/8/2N5/PP3PPP/R1BQ1RK1 w - - 0 1",
+        // Advanced passed pawns with kings and pieces around them (gCd8UcfI,
+        // 2qYroOWA), which is what `passed_pawn_pieces` reads.
+        "8/1P1Pk3/2n4p/2p5/2P2p2/K2N4/8/8 w - - 1 56",
+        "1Q6/3Pqpk1/6p1/8/7p/2P4P/3b1PP1/5K2 w - - 1 58",
     ] {
         let a = Chessboard::from_fen(fen).unwrap();
         let m = mirror(fen);
@@ -572,6 +576,29 @@ fn evaluation_is_colour_symmetric() {
             evaluate(&a), evaluate(&b)
         );
     }
+}
+
+/// A passed pawn whose queening square the enemy controls is worth less than
+/// the same pawn with a free path. The piece-square tables cannot tell them
+/// apart, and that threw away gCd8UcfI: the engine sacrificed a rook into an
+/// endgame it scored +394 for two pawns on the seventh that a knight had
+/// stopped. Stockfish scores it 0.00.
+///
+/// Measured as a difference of differences so that nothing but the passed-pawn
+/// term can move it: the knight moves between a5 and c6 (covering d8 or not)
+/// with the pawn on d7, and again with the pawn on d3, where the term does not
+/// apply. The tables, mobility and the pawn hash cancel.
+#[test]
+fn a_stopped_passed_pawn_is_worth_less_than_a_free_one() {
+    use chess_engine::eval::evaluate;
+    let e = |fen: &str| evaluate(&Chessboard::from_fen(fen).unwrap());
+    let advanced = e("7k/3P4/2n5/8/8/8/8/K7 w - - 0 1") - e("7k/3P4/8/n7/8/8/8/K7 w - - 0 1");
+    let behind = e("7k/8/2n5/8/8/3P4/8/K7 w - - 0 1") - e("7k/8/8/n7/8/3P4/8/K7 w - - 0 1");
+    assert!(
+        advanced - behind <= -50,
+        "covering the queening square of a pawn on the seventh moved it by only {}cp",
+        advanced - behind
+    );
 }
 
 /// The principal variation must be a real, playable line -- every move legal in
