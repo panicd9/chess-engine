@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use crate::{
     chessboard::{Chessboard, Color},
@@ -87,6 +88,11 @@ pub struct History {
     /// Set while the score currently being computed depends on the moves played
     /// to reach it rather than on the position alone. See [`History::table`].
     path_dependent: bool,
+    /// Name each root move over UCI as it is started, once a search is long
+    /// enough to want it. Only the UCI driver sets this, so the harnesses and
+    /// tests that call the search directly print nothing. See
+    /// [`ROOT_MOVE_OUTPUT_NODES`].
+    pub announce_root_moves: bool,
 }
 
 impl Default for History {
@@ -105,6 +111,7 @@ impl History {
             // driver sizes it once before searching.
             table: TranspositionTable::new(0),
             path_dependent: false,
+            announce_root_moves: false,
         }
     }
 
@@ -240,6 +247,46 @@ pub fn nodes_searched() -> u64 {
     NODES.load(Ordering::Relaxed)
 }
 
+/// Deepest ply any node has reached since [`reset_seldepth`], counting the root
+/// as 1. Reported as `seldepth` over UCI.
+///
+/// Every node counts, quiescence included, so this is how far the longest line
+/// actually ran. Stockfish counts only PV nodes, so its figure is not the same
+/// measurement and the two should not be compared.
+static SELDEPTH: AtomicU32 = AtomicU32::new(0);
+
+pub fn reset_seldepth() {
+    SELDEPTH.store(0, Ordering::Relaxed);
+}
+
+pub fn seldepth() -> u32 {
+    SELDEPTH.load(Ordering::Relaxed)
+}
+
+/// Record that a node was searched at this ply. A load and a compare: the store
+/// only happens when a line goes deeper than any before it.
+#[inline]
+fn note_ply(ply: usize) {
+    let reached = ply as u32 + 1;
+    if reached > SELDEPTH.load(Ordering::Relaxed) {
+        SELDEPTH.store(reached, Ordering::Relaxed);
+    }
+}
+
+/// Nodes a search must have visited before the root names each move it starts.
+/// Stockfish's `NODES_LIMIT_OUTPUT`: below it a search is over too quickly for
+/// the lines to be read, and they would only flood the GUI.
+pub const ROOT_MOVE_OUTPUT_NODES: u64 = 10_000_000;
+
+/// `info depth <d> currmove <move> currmovenumber <n>`, as Stockfish sends it.
+#[cold]
+fn announce_root_move(root: &Chessboard, child: &Chessboard, depth: u32, number: usize) {
+    if let Some(mv) = crate::notation::describe_move(root, child) {
+        println!("info depth {depth} currmove {mv} currmovenumber {number}");
+        let _ = std::io::stdout().flush();
+    }
+}
+
 /// Count this node and report whether the search has been asked to stop.
 ///
 /// Every node reads the flag. Sampling it (say, every 2048th node) would only
@@ -327,6 +374,7 @@ fn search_node(
         // Unwind immediately. The caller discards this iteration's result.
         return (0, *cb);
     }
+    note_ply(ply);
 
     // What do we already know about this position? A usable score ends the
     // node outright; otherwise the stored move still tells us what to try first.
@@ -462,6 +510,12 @@ fn search_node(
     'legal_moves: while let Some(next_move) = legal_moves.next_move() {
         // Extract the new position from the move.
         let pos = next_move.chessboard;
+        if ply == 0
+            && history.announce_root_moves
+            && NODES.load(Ordering::Relaxed) > ROOT_MOVE_OUTPUT_NODES
+        {
+            announce_root_move(cb, &pos, depth, moves_searched + 1);
+        }
         // Negamax: invert alpha and beta for the recursive call.
         let safe_beta = safe_neg(beta);
         let safe_alpha = safe_neg(alpha);
@@ -698,6 +752,7 @@ pub fn quiescence_search_best_move(
     if count_node_and_should_stop() {
         return (0, *cb);
     }
+    note_ply(ply);
 
     // Do a static evaluation of the current (quiet) position.
     // For black, invert the evaluation to maintain the negamax framework.

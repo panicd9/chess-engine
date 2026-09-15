@@ -81,6 +81,70 @@ fn handshake_and_fixed_depth_search() {
     }
 }
 
+/// The value after `name` in a UCI line, as a number.
+fn uci_field(line: &str, name: &str) -> u64 {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let at = tokens.iter().position(|t| *t == name).unwrap_or_else(|| panic!("no {name}: {line}"));
+    tokens[at + 1].parse().unwrap_or_else(|_| panic!("{name} is not a number: {line}"))
+}
+
+/// `seldepth` and `hashfull`, which Stockfish's `info` line has and ours did not.
+/// Every iteration of a fresh search has lines that run into quiescence below
+/// its nominal depth, so seldepth passes depth; and a 1 MB table is small enough
+/// for depth 8 to visibly fill.
+#[test]
+fn reports_seldepth_and_hashfull() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Hash value 1");
+    let (_, lines) = engine.bestmove("position startpos", "go depth 8");
+    let infos: Vec<_> = lines.iter().filter(|l| l.starts_with("info depth")).collect();
+    assert!(!infos.is_empty(), "no info lines: {lines:?}");
+    for info in &infos {
+        assert!(uci_field(info, "seldepth") > uci_field(info, "depth"), "{info}");
+        assert!(uci_field(info, "hashfull") <= 1000, "hashfull is in permille: {info}");
+    }
+    let last = infos.last().unwrap();
+    assert!(uci_field(last, "hashfull") > 0, "a 1 MB table read as empty: {last}");
+}
+
+/// Past `search::ROOT_MOVE_OUTPUT_NODES` the root names each move as it starts
+/// it, numbered from 1, in the form Stockfish uses. Ignored because it takes a
+/// search of 20-30 seconds: the announcement is made when a root move *starts*,
+/// and an iteration's first move is most of its work, so a fixed movetime can
+/// cross the threshold and still print nothing.
+#[test]
+#[ignore]
+fn announces_root_moves_on_long_searches() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos");
+    engine.send("go infinite");
+    let started = Instant::now();
+    // Wait for an iteration that starts past the threshold, which numbers from 1.
+    let mut announced: Vec<String> = Vec::new();
+    while !announced.iter().any(|l| l.ends_with(" currmovenumber 1")) {
+        assert!(started.elapsed().as_secs() < 180, "no full iteration announced: {announced:?}");
+        let line = engine.read_until("info").pop().unwrap();
+        if line.contains(" currmove ") {
+            announced.push(line);
+        }
+    }
+    engine.send("stop");
+    engine.read_until("bestmove");
+    for line in &announced {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(tokens[..2], ["info", "depth"], "{line}");
+        assert_eq!((tokens[3], tokens[5]), ("currmove", "currmovenumber"), "{line}");
+        assert!(uci_field(line, "currmovenumber") >= 1, "{line}");
+    }
+    // Each move is the one after the last, or the first of a new (re-)search.
+    for pair in announced.windows(2) {
+        let (before, after) = (uci_field(&pair[0], "currmovenumber"), uci_field(&pair[1], "currmovenumber"));
+        assert!(after == before + 1 || after == 1, "numbering skipped: {pair:?}");
+    }
+}
+
 #[test]
 fn reports_forced_mate() {
     let mut engine = Engine::start();

@@ -113,6 +113,26 @@ impl TranspositionTable {
         !self.entries.is_empty()
     }
 
+    /// How full the table is, in permille, sampled from the first thousand
+    /// slots. A slot's index is its key's low bits, so any thousand are a fair
+    /// sample of the whole. Reported as `hashfull` over UCI.
+    ///
+    /// Not the same measurement as Stockfish's, which counts only entries the
+    /// current search has stored or probed. Ours carry no age, because the table
+    /// lasts the game and an entry from an earlier move is as valid as a new one,
+    /// so this counts every occupied slot. It climbs over a game rather than
+    /// restarting each move. Since a store over another position always replaces
+    /// it, the reading is also roughly the share of stores that now evict
+    /// something.
+    pub fn hashfull(&self) -> u32 {
+        let sample = &self.entries[..self.entries.len().min(1000)];
+        if sample.is_empty() {
+            return 0;
+        }
+        let used = sample.iter().filter(|e| e.key != 0).count();
+        (used * 1000 / sample.len()) as u32
+    }
+
     /// Forget everything. Called between games, not between moves: entries from
     /// earlier in the same game are still valid and worth keeping.
     pub fn clear(&mut self) {

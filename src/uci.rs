@@ -406,6 +406,7 @@ fn search_and_report(
     // every later search, so only the first move of a game ever paid it.
     search::reset_nodes();
     history.ensure_table(options.table_megabytes);
+    history.announce_root_moves = true;
 
     let started = Instant::now();
     let budget = limits.budget(board.side_to_move, &options);
@@ -484,6 +485,8 @@ fn search_and_report(
             Some(p) if depth >= 4 => (p - ASPIRATION_INITIAL, p + ASPIRATION_INITIAL),
             _ => (i32::MIN + 1, i32::MAX - 1),
         };
+        // Per iteration, as Stockfish does, and across its aspiration re-searches.
+        search::reset_seldepth();
 
         let (score, position) = loop {
             let (score, position) =
@@ -637,6 +640,8 @@ fn report_info(
     let millis = elapsed.as_millis().max(1) as u64;
     let nodes = search::nodes_searched();
     let nps = nodes * 1000 / millis;
+    let seldepth = search::seldepth();
+    let hashfull = history.table.hashfull();
 
     let score_text = match search::mate_in_plies(score) {
         // UCI counts mate in moves, and signs it from the side to move: a
@@ -690,7 +695,8 @@ fn report_info(
     }
 
     println!(
-        "info depth {depth} score {score_text} nodes {nodes} nps {nps} time {millis} pv {pv}"
+        "info depth {depth} seldepth {seldepth} score {score_text} nodes {nodes} nps {nps} \
+         hashfull {hashfull} time {millis} pv {pv}"
     );
     let _ = io::stdout().flush();
     predicted
