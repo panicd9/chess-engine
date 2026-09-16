@@ -580,6 +580,155 @@ fn ponderhit_starts_the_clock() {
     );
 }
 
+/// After `ponderhit` the soft bound still applies, measured from the hit.
+///
+/// It did not: the deepening loop guarded the soft bound on `deadline`, which a
+/// ponder search never has, so once the hit arrived nothing stopped it starting
+/// another iteration and it ran to the *hard* bound every time. Measured over
+/// the bot's own games, a move that was pondered and hit cost 2.1x the clock of
+/// a plain move (8.72s against 4.06s at a 30-60s clock) for the same median
+/// depth. No A/B could see it: cutechess does not ponder unless told to, so
+/// every match that set the bounds was played without a single hit.
+///
+/// `Max Scale 1000` separates the two bounds by 10x so the difference is far
+/// larger than one iteration of slack. The lower bound matters too: measuring
+/// from the start of the search rather than from the hit would make a pondered
+/// move answer instantly, giving away the clock instead of overspending it.
+#[test]
+fn ponderhit_keeps_the_soft_bound() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Move Overhead value 30");
+    engine.send("setoption name Max Scale value 1000");
+    engine.send("position startpos");
+    engine.send("go ponder wtime 60000 btime 60000");
+    // Long enough to be several iterations in, short enough that the iteration
+    // still in flight at the hit is a fraction of a second.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    let elapsed = started.elapsed().as_millis();
+
+    let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+    assert_eq!(mv.len(), 4);
+    // A 60s clock gives a soft bound near 0.9s and a hard bound near 7.3s here.
+    assert!(
+        elapsed < 3500,
+        "took {elapsed}ms after ponderhit, which is the hard bound, not the soft one"
+    );
+    assert!(
+        elapsed > 150,
+        "answered after {elapsed}ms: the budget is being measured from the start \
+         of the ponder search rather than from the hit"
+    );
+}
+
+/// `Ponder Charge 100` is Stockfish's rule: the time spent on the opponent's
+/// clock counts against the move's budget, so a hit that has already used it up
+/// answers at once and banks the rest of the clock for later moves. The option
+/// exists so the two rules can be A/B'd with one binary; this only pins that it
+/// does what it says.
+#[test]
+fn ponder_charge_spends_the_pondering_time() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Move Overhead value 30");
+    engine.send("setoption name Ponder Charge value 100");
+    engine.send("position startpos");
+    // A 30s clock gives a soft bound well under a second, so two seconds of
+    // pondering has already spent it several times over.
+    engine.send("go ponder wtime 30000 btime 30000");
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    let elapsed = started.elapsed().as_millis();
+    assert_eq!(lines.last().unwrap().split_whitespace().nth(1).unwrap().len(), 4);
+    assert!(
+        elapsed < 1500,
+        "took {elapsed}ms after the hit; the pondering time was not charged"
+    );
+}
+
+/// A predicted reply can end the game. Pondering a position with no legal move
+/// must still answer when the GUI asks, rather than hanging on a search that
+/// never had a move to find. Here the prediction is Qh4 mate: the engine is
+/// pondering its own checkmate.
+#[test]
+fn ponder_on_a_position_with_no_move() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos moves f2f3 e7e5 g2g4 d8h4");
+    engine.send("go ponder wtime 10000 btime 10000");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    assert!(
+        started.elapsed().as_millis() < 2000,
+        "took {:?} to answer from a mated position",
+        started.elapsed()
+    );
+    assert_eq!(
+        lines.last().unwrap().split_whitespace().nth(1),
+        Some("0000"),
+        "a mated position has no move to play: {lines:?}"
+    );
+}
+
+/// `stop` immediately after `go ponder`, before the search has reported
+/// anything. The flag is read at every node, so this must come back at once --
+/// and with a legal move, because the GUI may be about to play it.
+#[test]
+fn stop_immediately_after_go_ponder() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos moves e2e4 e7e5 g1f3 b8c6");
+    engine.send("go ponder wtime 60000 btime 60000");
+    engine.send("stop");
+
+    let started = Instant::now();
+    let lines = engine.read_until("bestmove");
+    let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+    assert!(
+        started.elapsed().as_millis() < 1000,
+        "took {:?} to answer a stop sent straight after `go ponder`",
+        started.elapsed()
+    );
+    assert_eq!(mv.len(), 4, "answered `{mv}` rather than a move");
+}
+
+/// `ucinewgame` while pondering. It stops the search first -- so a `bestmove`
+/// for the abandoned ponder position comes out, which is what Stockfish does
+/// too -- and the engine must be ready for the next game straight after.
+#[test]
+fn ucinewgame_during_a_ponder_search() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos moves d2d4 d7d5 c2c4");
+    engine.send("go ponder wtime 60000 btime 60000");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    engine.send("ucinewgame");
+    engine.send("isready");
+    let lines = engine.read_until("readyok");
+    assert!(
+        lines.iter().filter(|l| l.starts_with("bestmove")).count() <= 1,
+        "more than one bestmove for one search: {lines:?}"
+    );
+
+    // The table was cleared under a running search; the next one must be sane.
+    let (mv, lines) = engine.bestmove("position startpos", "go depth 6");
+    assert_eq!(mv.len(), 4, "no move after ucinewgame mid-ponder");
+    assert!(
+        lines.iter().any(|l| l.starts_with("info depth 6")),
+        "the search after ucinewgame did not reach depth 6: {lines:?}"
+    );
+}
+
 /// The `ponder` token must be the reply from the PV of the last completed
 /// iteration, not whatever the table holds once the search has finished.
 ///
