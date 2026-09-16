@@ -598,6 +598,9 @@ fn ponderhit_starts_the_clock() {
 fn ponderhit_keeps_the_soft_bound() {
     let mut engine = Engine::start();
     engine.handshake();
+    // The rule under test is the budget measured from the hit, which is `Ponder
+    // Charge 0`; the default charges the pondering time as well.
+    engine.send("setoption name Ponder Charge value 0");
     engine.send("setoption name Move Overhead value 30");
     engine.send("setoption name Max Scale value 1000");
     engine.send("position startpos");
