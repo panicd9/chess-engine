@@ -33,6 +33,18 @@ static PONDER_HIT: AtomicBool = AtomicBool::new(false);
 static PONDER_HIT_AT_MS: AtomicU64 = AtomicU64::new(NO_HIT);
 const NO_HIT: u64 = u64::MAX;
 
+/// Set by a ponder search, between iterations, once the move's budget is
+/// already spent by the time charged to it -- so that when `ponderhit` comes,
+/// the watchdog stops the search that instant instead of letting it finish the
+/// iteration in flight. Stockfish's `stopOnPonderhit`.
+///
+/// Without it `Ponder Charge 100` only acted between iterations. At 10+0.1 an
+/// iteration costs milliseconds, so that looked instant; at the bot's 5+3 and
+/// 10+5 one costs 10-20 seconds, and the first four hits on the new build took
+/// 7-20s of our clock after the hit -- one of them 19.8s after 17.2s of
+/// pondering, for no extra depth.
+static STOP_ON_PONDERHIT: AtomicBool = AtomicBool::new(false);
+
 const NAME: &str = concat!("chess-engine ", env!("CARGO_PKG_VERSION"));
 const AUTHOR: &str = "Darko Panic";
 
@@ -806,6 +818,7 @@ pub fn run() -> io::Result<()> {
                 stop_search(&mut worker, &mut history);
                 PONDER_HIT.store(false, Ordering::Relaxed);
                 PONDER_HIT_AT_MS.store(NO_HIT, Ordering::Relaxed);
+                STOP_ON_PONDERHIT.store(false, Ordering::Relaxed);
                 let limits = parse_go(&line);
                 // Lend the search everything we have, including the table, and
                 // take it back when it finishes. Every command that reads
@@ -904,6 +917,12 @@ fn search_and_report(
                     if PONDER_HIT.load(Ordering::Relaxed) {
                         PONDER_HIT_AT_MS
                             .store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                        if STOP_ON_PONDERHIT.load(Ordering::Relaxed) {
+                            // The budget went on pondering: answer now, with the
+                            // last completed iteration's move.
+                            search::STOP.store(true, Ordering::Relaxed);
+                            return;
+                        }
                         break;
                     }
                     match done_rx.recv_timeout(Duration::from_millis(2)) {
@@ -1053,37 +1072,44 @@ fn search_and_report(
         // since it began. A ponder search: nothing until the hit, because until
         // then we are spending the opponent's clock and there is no reason to
         // stop -- and from the hit onwards, the time since the hit.
-        let spent = if pondering {
-            match PONDER_HIT_AT_MS.load(Ordering::Relaxed) {
-                NO_HIT => None,
-                hit_ms => {
-                    let since_hit =
-                        started.elapsed().saturating_sub(Duration::from_millis(hit_ms));
-                    // Plus whatever share of the ponder phase this move is
-                    // charged for. See `DEFAULT_PONDER_CHARGE_PERCENT`.
-                    let charged = hit_ms * options.ponder_charge_percent / 100;
-                    Some(since_hit + Duration::from_millis(charged))
+        if let Some(budget) = budget {
+            // Spend unevenly: an unsettled root move or a score that is
+            // falling earns more of the clock, a settled one less. This only
+            // moves the *soft* bound -- `maximum` is untouched, so the
+            // factors can shift time between moves but can never overrun the
+            // hard limit or lose on time.
+            let scale =
+                pacing.scale_percent(previous_move_score, previous_reduction, depth, &options);
+            let want = (budget.optimum.as_millis() as u64 * scale / 100).max(1);
+            let soft = Duration::from_millis(want).min(budget.maximum);
+            // The share of pondering time this move is charged for. See
+            // `DEFAULT_PONDER_CHARGE_PERCENT`.
+            let charged =
+                |ms: u64| Duration::from_millis(ms * options.ponder_charge_percent / 100);
+            if pondering {
+                match PONDER_HIT_AT_MS.load(Ordering::Relaxed) {
+                    // Still on the opponent's clock, so never stop here. But if
+                    // the hit came now the budget would already be gone: arm the
+                    // watchdog to stop the moment it does. If it has landed
+                    // since the load above, this is between iterations anyway.
+                    NO_HIT => {
+                        if charged(started.elapsed().as_millis() as u64) >= soft {
+                            STOP_ON_PONDERHIT.store(true, Ordering::Relaxed);
+                            if PONDER_HIT.load(Ordering::Relaxed) {
+                                break;
+                            }
+                        }
+                    }
+                    hit_ms => {
+                        let since_hit =
+                            started.elapsed().saturating_sub(Duration::from_millis(hit_ms));
+                        if since_hit + charged(hit_ms) >= soft {
+                            break;
+                        }
+                    }
                 }
-            }
-        } else if deadline.is_some() {
-            Some(started.elapsed())
-        } else {
-            None
-        };
-        if let Some(spent) = spent {
-            if let Some(budget) = budget {
-                // Spend unevenly: an unsettled root move or a score that is
-                // falling earns more of the clock, a settled one less. This only
-                // moves the *soft* bound -- `maximum` is untouched, so the
-                // factors can shift time between moves but can never overrun the
-                // hard limit or lose on time.
-                let scale =
-                    pacing.scale_percent(previous_move_score, previous_reduction, depth, &options);
-                let want = (budget.optimum.as_millis() as u64 * scale / 100).max(1);
-                let soft = Duration::from_millis(want).min(budget.maximum);
-                if spent >= soft {
-                    break;
-                }
+            } else if deadline.is_some() && started.elapsed() >= soft {
+                break;
             }
         }
     }

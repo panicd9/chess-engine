@@ -656,6 +656,44 @@ fn ponder_charge_spends_the_pondering_time() {
     );
 }
 
+/// When pondering has already used the move's budget, `ponderhit` must answer at
+/// once, not after the iteration in flight -- Stockfish's `stopOnPonderhit`.
+///
+/// `Ponder Charge 100` without it only acted between iterations. At 10+0.1 that
+/// looks instant, because an iteration costs milliseconds; at the bot's time
+/// controls one costs 10-20 seconds, and hits took 7-20s of our clock after the
+/// hit. A 10s clock gives a soft bound of a few hundred milliseconds, so after
+/// seconds of pondering every search here is past it, and several positions make
+/// it unlikely that each hit just happens to land at the end of an iteration.
+#[test]
+fn ponderhit_answers_at_once_when_the_budget_is_spent() {
+    let positions = [
+        "position startpos",
+        "position startpos moves e2e4 e7e5 g1f3 b8c6 f1b5 a7a6",
+        "position startpos moves d2d4 d7d5 c2c4 e7e6 b1c3 g8f6",
+    ];
+    for position in positions {
+        let mut engine = Engine::start();
+        engine.handshake();
+        engine.send("setoption name Move Overhead value 30");
+        engine.send(position);
+        engine.send("go ponder wtime 10000 btime 10000");
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+
+        let started = Instant::now();
+        engine.send("ponderhit");
+        let lines = engine.read_until("bestmove");
+        let elapsed = started.elapsed().as_millis();
+        let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+        assert_eq!(mv.len(), 4, "`{position}`: answered `{mv}`");
+        assert!(
+            elapsed < 150,
+            "`{position}`: took {elapsed}ms after ponderhit with the budget already \
+             spent on pondering -- it finished the iteration in flight"
+        );
+    }
+}
+
 /// A predicted reply can end the game. Pondering a position with no legal move
 /// must still answer when the GUI asks, rather than hanging on a search that
 /// never had a move to find. Here the prediction is Qh4 mate: the engine is
