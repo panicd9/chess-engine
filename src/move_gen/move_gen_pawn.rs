@@ -4,6 +4,8 @@ use crate::{chessboard::{
     Bitboard, Chessboard, SingletonBitboard,
 }, move_list::Move};
 
+use super::legality::Legality;
+
 pub const PAWNS_MOVES_CAPACITY: usize = 20;
 
 #[rustfmt::skip]
@@ -60,73 +62,72 @@ pub fn single_black_pawn_attacks(pawn: SingletonBitboard) -> Bitboard {
     BLACK_PAWN_ATTACKS[pawn.trailing_zeros() as usize]
 }
 
-pub fn white_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>) {
+pub fn white_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
 
     let en_passant_square = cb.get_en_passant_bitboard();
     let occupancy = cb.get_occupancy();
+    let black_occupancy = cb.get_black_occupancy();
 
     let mut remaining_pawns = cb.white_pawns;
     while remaining_pawns != 0 {
         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
         let square = single_pawn.trailing_zeros() as usize;
+        // Where this pawn may land without leaving the king attacked: the
+        // check mask, narrowed to the pin line when it is pinned.
+        let allowed = legality.allowed(single_pawn, square);
         // Forward moves
         let forward = WHITE_PAWN_FORWARD_MOVES[square] & !occupancy;
         if forward != 0 {
             // Not promotion
             if forward & RANK_8 == 0 {
-                let new_move = cb.make_white_pawn_forward_move(single_pawn, forward);
-                // TODO: Can be optimized by checking if the king is under attack before changing side to move
-                if !new_move.chessboard.is_white_king_under_attack() {
-                    moves.push(new_move);
+                if forward & allowed != 0 {
+                    moves.push(cb.make_white_pawn_forward_move(single_pawn, forward));
                 }
 
-                // Double forward move (only from the second rank)
+                // Double forward move (only from the second rank). The square
+                // it steps over still has to be empty -- that is `forward` --
+                // but it does not have to be one the pawn may stop on.
                 if (single_pawn & RANK_2) != 0 {
                     let double_forward = (single_pawn << 16) & !occupancy;
-                    if double_forward != 0 {
-                        let new_double_forward_move =
-                            cb.make_white_pawn_double_forward_move(single_pawn, double_forward);
-                        if !new_double_forward_move.chessboard.is_white_king_under_attack() {
-                            moves.push(new_double_forward_move);
-                        }
+                    if double_forward & allowed != 0 {
+                        moves.push(
+                            cb.make_white_pawn_double_forward_move(single_pawn, double_forward),
+                        );
                     }
                 }
                 // Promotion
-            } else {
-                let new_promotion_moves =
-                    cb.make_all_white_pawn_promotion_moves(single_pawn, forward);
-                for new_move in new_promotion_moves {
-                    if !new_move.chessboard.is_white_king_under_attack() {
-                        moves.push(new_move);
-                    }
+            } else if forward & allowed != 0 {
+                // All four promotions stand or fall together: they differ only
+                // in the piece left on the square, and no attack on our own
+                // king can depend on which piece that is.
+                for new_move in cb.make_all_white_pawn_promotion_moves(single_pawn, forward) {
+                    moves.push(new_move);
                 }
             }
         }
 
         // Attack moves
-        let attacks = WHITE_PAWN_ATTACKS[square] & cb.get_black_occupancy();
+        let attacks = WHITE_PAWN_ATTACKS[square] & black_occupancy & allowed;
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
             if single_attack & RANK_8 == 0 {
-                let new_move = cb.make_white_pawn_capture_move(single_pawn, single_attack);
-                if !new_move.chessboard.is_white_king_under_attack() {
-                    moves.push(new_move);
-                }
+                moves.push(cb.make_white_pawn_capture_move(single_pawn, single_attack));
             } else {
-                let new_promotion_moves =
-                    cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack);
-                for new_move in new_promotion_moves {
-                    if !new_move.chessboard.is_white_king_under_attack() {
-                        moves.push(new_move);
-                    }
+                for new_move in
+                    cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack)
+                {
+                    moves.push(new_move);
                 }
             }
 
             remaining_attacks &= remaining_attacks - 1;
         }
 
-        // En passant capture
+        // En passant is the one move the masks cannot decide. It takes two
+        // pieces off one rank, so it can uncover a rook that no pin describes,
+        // and in check it can answer by capturing the checking pawn, which
+        // `check_mask` would reject. Make it and look, as everything used to.
         if en_passant_square != 0 {
             let en_passant_mask = en_passant_square & WHITE_PAWN_ATTACKS[square];
             if en_passant_mask != 0 {
@@ -143,67 +144,57 @@ pub fn white_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>) {
     }
 }
 
-pub fn black_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>) {
+pub fn black_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
 
     let en_passant_square = cb.get_en_passant_bitboard();
     let occupancy = cb.get_occupancy();
+    let white_occupancy = cb.get_white_occupancy();
 
     let mut remaining_pawns = cb.black_pawns;
     while remaining_pawns != 0 {
         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
         let square = single_pawn.trailing_zeros() as usize;
+        let allowed = legality.allowed(single_pawn, square);
 
         // Forward moves
         let forward = BLACK_PAWN_FORWARD_MOVES[square] & !occupancy;
         if forward != 0 {
             // Not promotion
             if forward & RANK_1 == 0 {
-                let new_move = cb.make_black_pawn_forward_move(single_pawn, forward);
-                if !new_move.chessboard.is_black_king_under_attack() {
-                    moves.push(new_move);
+                if forward & allowed != 0 {
+                    moves.push(cb.make_black_pawn_forward_move(single_pawn, forward));
                 }
 
                 // Double forward move (only from the seventh rank)
                 if (single_pawn & RANK_7) != 0 {
                     let double_forward = (single_pawn >> 16) & !occupancy;
-                    if double_forward != 0 {
-                        let new_double_forward_move =
-                            cb.make_black_pawn_double_forward_move(single_pawn, double_forward);
-                        if !new_double_forward_move.chessboard.is_black_king_under_attack() {
-                            moves.push(new_double_forward_move);
-                        }
+                    if double_forward & allowed != 0 {
+                        moves.push(
+                            cb.make_black_pawn_double_forward_move(single_pawn, double_forward),
+                        );
                     }
                 }
-            } else {
-                // Promotion
-                let new_promotion_moves =
-                    cb.make_all_black_pawn_promotion_moves(single_pawn, forward);
-                for new_move in new_promotion_moves {
-                    if !new_move.chessboard.is_black_king_under_attack() {
-                        moves.push(new_move);
-                    }
+            } else if forward & allowed != 0 {
+                // Promotion. All four differ only in the piece left behind.
+                for new_move in cb.make_all_black_pawn_promotion_moves(single_pawn, forward) {
+                    moves.push(new_move);
                 }
             }
         }
 
         // Attack moves
-        let attacks = BLACK_PAWN_ATTACKS[square] & cb.get_white_occupancy();
+        let attacks = BLACK_PAWN_ATTACKS[square] & white_occupancy & allowed;
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
             if single_attack & RANK_1 == 0 {
-                let new_move = cb.make_black_pawn_capture_move(single_pawn, single_attack);
-                if !new_move.chessboard.is_black_king_under_attack() {
-                    moves.push(new_move);
-                }
+                moves.push(cb.make_black_pawn_capture_move(single_pawn, single_attack));
             } else {
                 // Capture promotion
-                let new_promotion_moves =
-                    cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack);
-                for new_move in new_promotion_moves {
-                    if !new_move.chessboard.is_black_king_under_attack() {
-                        moves.push(new_move);
-                    }
+                for new_move in
+                    cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack)
+                {
+                    moves.push(new_move);
                 }
             }
 
@@ -229,7 +220,7 @@ pub fn black_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>) {
 /// PROTOTYPE: the pawn moves quiescence keeps -- captures, capture-promotions
 /// and en passant. Quiet pushes (including quiet promotions) score below the
 /// capture threshold and are discarded, so they are never generated.
-pub fn white_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
+pub fn white_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
     let en_passant_square = cb.get_en_passant_bitboard();
     let black_occupancy = cb.get_black_occupancy();
     let occupancy = cb.get_occupancy();
@@ -238,33 +229,27 @@ pub fn white_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
     while remaining_pawns != 0 {
         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
         let square = single_pawn.trailing_zeros() as usize;
+        let allowed = legality.allowed(single_pawn, square);
 
         // A promotion push is quiet but decisive, and all four pieces score at
         // or above the capture threshold, so the old filter kept them.
         if single_pawn & RANK_7 != 0 {
             let forward = WHITE_PAWN_FORWARD_MOVES[square] & !occupancy;
-            if forward != 0 {
+            if forward & allowed != 0 {
                 for new_move in cb.make_all_white_pawn_promotion_moves(single_pawn, forward) {
-                    if !new_move.chessboard.is_white_king_under_attack() {
-                        moves.push(new_move);
-                    }
+                    moves.push(new_move);
                 }
             }
         }
 
-        let mut remaining_attacks = WHITE_PAWN_ATTACKS[square] & black_occupancy;
+        let mut remaining_attacks = WHITE_PAWN_ATTACKS[square] & black_occupancy & allowed;
         while remaining_attacks != 0 {
             let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
             if single_attack & RANK_8 == 0 {
-                let new_move = cb.make_white_pawn_capture_move(single_pawn, single_attack);
-                if !new_move.chessboard.is_white_king_under_attack() {
-                    moves.push(new_move);
-                }
+                moves.push(cb.make_white_pawn_capture_move(single_pawn, single_attack));
             } else {
                 for new_move in cb.make_all_white_pawn_capture_promotion_moves(single_pawn, single_attack) {
-                    if !new_move.chessboard.is_white_king_under_attack() {
-                        moves.push(new_move);
-                    }
+                    moves.push(new_move);
                 }
             }
             remaining_attacks &= remaining_attacks - 1;
@@ -284,7 +269,7 @@ pub fn white_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
     }
 }
 
-pub fn black_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
+pub fn black_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
     let en_passant_square = cb.get_en_passant_bitboard();
     let white_occupancy = cb.get_white_occupancy();
     let occupancy = cb.get_occupancy();
@@ -293,31 +278,25 @@ pub fn black_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>) {
     while remaining_pawns != 0 {
         let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
         let square = single_pawn.trailing_zeros() as usize;
+        let allowed = legality.allowed(single_pawn, square);
 
         if single_pawn & RANK_2 != 0 {
             let forward = BLACK_PAWN_FORWARD_MOVES[square] & !occupancy;
-            if forward != 0 {
+            if forward & allowed != 0 {
                 for new_move in cb.make_all_black_pawn_promotion_moves(single_pawn, forward) {
-                    if !new_move.chessboard.is_black_king_under_attack() {
-                        moves.push(new_move);
-                    }
+                    moves.push(new_move);
                 }
             }
         }
 
-        let mut remaining_attacks = BLACK_PAWN_ATTACKS[square] & white_occupancy;
+        let mut remaining_attacks = BLACK_PAWN_ATTACKS[square] & white_occupancy & allowed;
         while remaining_attacks != 0 {
             let single_attack = remaining_attacks & remaining_attacks.wrapping_neg();
             if single_attack & RANK_1 == 0 {
-                let new_move = cb.make_black_pawn_capture_move(single_pawn, single_attack);
-                if !new_move.chessboard.is_black_king_under_attack() {
-                    moves.push(new_move);
-                }
+                moves.push(cb.make_black_pawn_capture_move(single_pawn, single_attack));
             } else {
                 for new_move in cb.make_all_black_pawn_capture_promotion_moves(single_pawn, single_attack) {
-                    if !new_move.chessboard.is_black_king_under_attack() {
-                        moves.push(new_move);
-                    }
+                    moves.push(new_move);
                 }
             }
             remaining_attacks &= remaining_attacks - 1;

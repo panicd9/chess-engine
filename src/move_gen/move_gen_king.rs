@@ -1,5 +1,7 @@
 use crate::{chessboard::{Bitboard, Chessboard, SingletonBitboard, SquareIndex}, display::display_board, move_list::Move, utils::{BLACK_KING_CASTLE_EMPTY_SQUARES, BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES, BLACK_QUEEN_CASTLE_EMPTY_SQUARES, BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_KING_CASTLE_EMPTY_SQUARES, WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES, WHITE_QUEEN_CASTLE_EMPTY_SQUARES, WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES}};
 
+use super::legality::Legality;
+
 pub const KING_MOVES_CAPACITY: usize = 5;
 
 // Define the king move lookup table for each square on an 8x8 chessboard
@@ -30,30 +32,38 @@ pub fn king_attacks(king: SingletonBitboard) -> Bitboard {
     king_attacks_from_square(square)
 }
 
-pub fn white_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn white_king_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let king = cb.white_king;
     let occupancy = cb.get_occupancy();
 
-    // Normal king moves
-    let attacks = king_attacks(king) & targets;
+    // Normal king moves. `danger` already knows the king is not standing on
+    // the square it is leaving, so a slider's ray reaches the square behind it
+    // and the move is rejected here rather than by making it and looking.
+    let attacks = king_attacks(king) & targets & !legality.danger;
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
         let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-        let new_position = cb.make_white_king_move(king, single_attack_bitboard);
-        if !new_position.chessboard.is_white_king_under_attack() {
-            moves.push(new_position);
-        }
+        moves.push(cb.make_white_king_move(king, single_attack_bitboard));
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
 
-    // Castling moves
+    // Castling moves. The passthrough squares include the one the king is
+    // standing on, so being in check is rejected by the same test. `danger`
+    // differs from `all_black_attacks()` only on squares this king shadows,
+    // and any such square implies its own square is attacked, so this answers
+    // exactly as the old test did -- for one attack map per position rather
+    // than one per castling side.
     if cb.white_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
         let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_kingside_castle_squares_empty {
-            // Only calculate attacks if the squares are empty
-            let are_kingside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
+            let are_kingside_castle_squares_attacked = (legality.danger & WHITE_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_white_kingside_castle();
                 moves.push(new_position);
@@ -66,7 +76,7 @@ pub fn white_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targe
         let are_queen_side_castle_squares_empty = WHITE_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_queen_side_castle_squares_empty {
             // Only calculate attacks if the squares are empty
-            let are_queenside_castle_squares_attacked = (cb.all_black_attacks() & WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
+            let are_queenside_castle_squares_attacked = (legality.danger & WHITE_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_white_queenside_castle();
                 moves.push(new_position);
@@ -76,30 +86,38 @@ pub fn white_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targe
 
 }
 
-pub fn black_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn black_king_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let king = cb.black_king;
     let occupancy = cb.get_occupancy();
 
-    // Normal king moves
-    let attacks = king_attacks(king) & targets;
+    // Normal king moves. `danger` already knows the king is not standing on
+    // the square it is leaving, so a slider's ray reaches the square behind it
+    // and the move is rejected here rather than by making it and looking.
+    let attacks = king_attacks(king) & targets & !legality.danger;
     let mut remaining_attacks = attacks;
 
     while remaining_attacks != 0 {
         let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-        let new_position = cb.make_black_king_move(king, single_attack_bitboard);
-        if !new_position.chessboard.is_black_king_under_attack() {
-            moves.push(new_position);
-        }
+        moves.push(cb.make_black_king_move(king, single_attack_bitboard));
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
 
-    // Castling moves
+    // Castling moves. The passthrough squares include the one the king is
+    // standing on, so being in check is rejected by the same test. `danger`
+    // differs from `all_white_attacks()` only on squares this king shadows,
+    // and any such square implies its own square is attacked, so this answers
+    // exactly as the old test did -- for one attack map per position rather
+    // than one per castling side.
     if cb.black_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
         let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_kingside_castle_squares_empty {
-            // Only calculate attacks if the squares are empty
-            let are_kingside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
+            let are_kingside_castle_squares_attacked = (legality.danger & BLACK_KING_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_kingside_castle_squares_attacked {
                 let new_position = cb.make_black_kingside_castle();
                 moves.push(new_position);
@@ -112,7 +130,7 @@ pub fn black_king_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targe
         let are_queenside_castle_squares_empty = BLACK_QUEEN_CASTLE_EMPTY_SQUARES & occupancy == 0;
         if are_queenside_castle_squares_empty {
             // Only calculate attacks if the squares are empty
-            let are_queenside_castle_squares_attacked = (cb.all_white_attacks() & BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
+            let are_queenside_castle_squares_attacked = (legality.danger & BLACK_QUEEN_CASTLE_KING_PASSTHROUGH_SQUARES) != 0;
             if !are_queenside_castle_squares_attacked {
                 let new_position = cb.make_black_queenside_castle();
                 moves.push(new_position);

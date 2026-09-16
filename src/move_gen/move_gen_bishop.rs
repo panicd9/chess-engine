@@ -1,5 +1,7 @@
 use crate::{chessboard::{Bitboard, Chessboard}, move_list::Move, utils::{calculate_sliding_attacks, reverse_bits, ANTI_DIAGONAL_MASKS, DIAGONAL_MASKS}};
 
+use super::legality::Legality;
+
 const BISHOPS_MOVES_CAPACITY: usize = 14;
 
 // Generate bishop attacks on a diagonal using Hyperbola Quintessence.
@@ -56,21 +58,26 @@ pub fn all_bishops_attacks(occupancy: u64, bishops: u64) -> u64 {
     diagonal_attacks
 }
 
-pub fn white_bishops_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn white_bishops_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_bishops = cb.white_bishops;
+    let occupancy = cb.get_occupancy();
 
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
-        let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & targets;
+        let square = single_bishop_bitboard.trailing_zeros() as usize;
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard)
+            & targets
+            & legality.allowed(single_bishop_bitboard, square);
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_white_bishop_move(single_bishop_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_white_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_white_bishop_move(single_bishop_bitboard, single_attack_bitboard));
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }
         
@@ -79,21 +86,26 @@ pub fn white_bishops_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, ta
 
 }
 
-pub fn black_bishops_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn black_bishops_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_bishops = cb.black_bishops;
+    let occupancy = cb.get_occupancy();
 
     while remaining_bishops != 0 {
         let single_bishop_bitboard = remaining_bishops & remaining_bishops.wrapping_neg(); // Get the least significant bishop
-        let occupancy = cb.get_occupancy();
-        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard) & targets;
+        let square = single_bishop_bitboard.trailing_zeros() as usize;
+        let attacks = single_bishop_attacks(occupancy, single_bishop_bitboard)
+            & targets
+            & legality.allowed(single_bishop_bitboard, square);
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_black_bishop_move(single_bishop_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_black_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_black_bishop_move(single_bishop_bitboard, single_attack_bitboard));
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }
 

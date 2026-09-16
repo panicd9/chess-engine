@@ -1,5 +1,6 @@
 use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, move_list::Move, utils::{calculate_sliding_attacks, ANTI_DIAGONAL_MASKS, DIAGONAL_MASKS}};
 
+use super::legality::Legality;
 use super::{move_gen_bishop::{all_bishops_attacks, single_bishop_attacks}, move_gen_rook::{all_rooks_attacks, single_rook_attacks}};
 
 const QUEEN_MOVES_CAPACITY: usize = 10;
@@ -48,21 +49,26 @@ pub fn all_queens_attacks(occupancy: u64, queens: u64) -> u64 {
     combined_attacks
 }
 
-pub fn white_queens_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn white_queens_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_queens = cb.white_queens;
+    let occupancy = cb.get_occupancy();
 
     while remaining_queens != 0 {
         let single_queen_bitboard = remaining_queens & remaining_queens.wrapping_neg(); // Extract LSB
-        let occupancy = cb.get_occupancy();
-        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & targets;
+        let square = single_queen_bitboard.trailing_zeros() as usize;
+        let attacks = single_queen_attacks(occupancy, single_queen_bitboard)
+            & targets
+            & legality.allowed(single_queen_bitboard, square);
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_white_queen_move(single_queen_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_white_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_white_queen_move(single_queen_bitboard, single_attack_bitboard));
             remaining_attacks &= remaining_attacks - 1; // Remove LSB
         }
 
@@ -71,21 +77,26 @@ pub fn white_queens_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, tar
 
 }
 
-pub fn black_queens_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn black_queens_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_queens = cb.black_queens;
+    let occupancy = cb.get_occupancy();
 
     while remaining_queens != 0 {
         let single_queen_bitboard = remaining_queens & remaining_queens.wrapping_neg(); // Extract LSB
-        let occupancy = cb.get_occupancy();
-        let attacks = single_queen_attacks(occupancy, single_queen_bitboard) & targets;
+        let square = single_queen_bitboard.trailing_zeros() as usize;
+        let attacks = single_queen_attacks(occupancy, single_queen_bitboard)
+            & targets
+            & legality.allowed(single_queen_bitboard, square);
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_black_queen_move(single_queen_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_black_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_black_queen_move(single_queen_bitboard, single_attack_bitboard));
             remaining_attacks &= remaining_attacks - 1; // Remove LSB
         }
 

@@ -697,3 +697,88 @@ fn knight_attack_table_is_exact() {
         );
     }
 }
+
+/// The capture generator must produce everything the full generator produces
+/// that quiescence would keep.
+///
+/// `*_captures_into` duplicates `*_legal_moves_into` with the target mask
+/// narrowed, and the pawn capture generator duplicates the capture, promotion
+/// and en passant branches outright. When the two drift, quiescence searches
+/// the wrong set of moves and perft cannot see it, because perft never calls
+/// the capture path. A first cut of that split dropped the quiet promotions --
+/// all four score 6-9, which is at or above the threshold `quiescence_search`
+/// retains -- and lost a mate.
+///
+/// The legality masks are the same hazard again: they are applied in both
+/// generators, and masking one and not the other would show up here and
+/// nowhere else.
+#[test]
+fn capture_generator_keeps_everything_quiescence_wants() {
+    use chess_engine::move_gen::{
+        black_captures_into, black_legal_moves_into, white_captures_into, white_legal_moves_into,
+    };
+    use chess_engine::zobrist;
+
+    /// The score at or above which `quiescence_search_best_move` retains a move.
+    const QUIESCENCE_THRESHOLD: u32 = 6;
+
+    const POSITIONS: &[(&str, &str)] = &[
+        ("initial", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+        ("kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"),
+        ("kiwipete black", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1"),
+        ("endgame", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"),
+        ("promotions", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1"),
+        ("position 6 black", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 b - - 0 10"),
+        ("position 5", "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8"),
+        ("position 6", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10"),
+        // In check: the masks narrow to the checker and the squares before it.
+        ("in check", "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"),
+        // Pinned pieces, including a pinned pawn that may still capture.
+        ("pinned", "r2q1rk1/pP1p2pp/Q4n2/bbp1p3/Np6/1B3NBn/pPPP1PPP/R3K2R b KQ - 0 1"),
+        // A free promotion push for each side. All four pieces score 6-9, so
+        // quiescence keeps them and the capture generator has to produce them;
+        // the first cut of that generator did not, and lost a mate.
+        ("white promotion push", "7k/P7/8/8/8/8/8/K7 w - - 0 1"),
+        ("black promotion push", "k7/8/8/8/8/8/p7/7K b - - 0 1"),
+        // A pinned pawn with a capture that the pin forbids. Masking this in
+        // one generator and not the other puts an illegal move in quiescence.
+        ("pinned pawn capture", "4r2k/8/8/8/8/3n4/4P3/4K3 w - - 0 1"),
+        ("pinned pawn capture black", "4k3/4p3/3N4/8/8/8/8/4R2K b - - 0 1"),
+        // En passant, which is the one move still decided by make-and-test.
+        ("en passant", "8/8/3p4/KPp4r/1R3p1k/8/4P1P1/8 w - c6 0 3"),
+        ("en passant pin", "8/8/8/2KPp2r/8/8/8/4k3 w - e6 0 1"),
+    ];
+
+    for (name, fen) in POSITIONS {
+        let cb = Chessboard::from_fen(fen).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let white = cb.side_to_move == Color::White;
+
+        let mut full = Vec::new();
+        let mut captures = Vec::new();
+        if white {
+            white_legal_moves_into(&cb, &mut full);
+            white_captures_into(&cb, &mut captures);
+        } else {
+            black_legal_moves_into(&cb, &mut full);
+            black_captures_into(&cb, &mut captures);
+        }
+
+        let key = |m: &chess_engine::move_list::Move| (zobrist::hash(&m.chessboard), m.score);
+        let in_captures: Vec<_> = captures.iter().map(key).collect();
+        let in_full: Vec<_> = full.iter().map(key).collect();
+
+        for m in full.iter().filter(|m| m.score >= QUIESCENCE_THRESHOLD) {
+            assert!(
+                in_captures.contains(&key(m)),
+                "{name}: the capture generator dropped a move scoring {} that quiescence keeps",
+                m.score
+            );
+        }
+        for m in &captures {
+            assert!(
+                in_full.contains(&key(m)),
+                "{name}: the capture generator invented a move the full generator does not have"
+            );
+        }
+    }
+}
