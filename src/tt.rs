@@ -208,9 +208,13 @@ impl TranspositionTable {
             }
             return;
         }
+        // A store with no move keeps the move this position already had: the
+        // search that just ran learned nothing about which move is best, so
+        // what an earlier search learned still stands. See `search_node`.
+        let best_move = if packed == 0 && slot.key == key { slot.best_move } else { packed };
         *slot = Entry {
             key,
-            best_move: packed,
+            best_move,
             score,
             depth: depth.min(u8::MAX as u32) as u8,
             bound,

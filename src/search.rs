@@ -731,11 +731,20 @@ fn search_node(
         // is worth having for ordering and for the principal variation -- while
         // ensuring no search deeper than 0 will ever trust the score.
         let storable_depth = if history.path_dependent { 0 } else { depth };
+        // No move from a node where nothing beat alpha. Every move there was
+        // refuted, so the "best" of them is only the least-refuted -- and the
+        // table would hand it on as the move to try first, and as the reply the
+        // principal variation expects. Replayed over eight of the bot's games
+        // with real clocks and pondering, every ponder token that flattered us
+        // by two pawns or more against the reply the engine names when asked
+        // directly (22 of 532 turns) had been written by exactly such a node.
+        // Stockfish stores no move here either and keeps whatever was there.
+        let stored_move = if bound == Bound::Upper { 0 } else { best_move };
         #[cfg(test)]
         if STOP.load(Ordering::Relaxed) {
             test_hooks::STORES_WHILE_STOPPED.fetch_add(1, Ordering::Relaxed);
         }
-        history.table.store(key, storable_depth, best_score, bound, best_move);
+        history.table.store(key, storable_depth, best_score, bound, stored_move);
     }
 
     // Propagate upwards: our caller's score depends on ours.
