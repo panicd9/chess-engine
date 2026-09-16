@@ -123,6 +123,23 @@ const DEFAULT_SOFT_SCALE_PERCENT: u64 = 62;
 /// with room and reaches p75.
 const DEFAULT_MAX_SCALE_PERCENT: u64 = 300;
 
+/// How much of the time spent pondering counts against the move's budget once
+/// the hit arrives, in percent. Exposed as `setoption name Ponder Charge` so the
+/// two defensible rules can be played off against each other with one binary.
+///
+/// 0 -- the budget starts at the hit. The ponder phase was free, spent on the
+/// opponent's clock, and the move gets the same share of ours as any other.
+/// This is what the `Ponder` bonus on `optimum` already assumes.
+///
+/// 100 -- Stockfish's rule: its clock runs from `go ponder`, so a hit that has
+/// already used the budget answers at once and banks the time for later moves.
+///
+/// Which is worth more Elo is an open question, not a matter of correctness:
+/// one buys depth on the 42% of moves that hit, the other buys time everywhere
+/// else. The hard bound is unaffected either way -- it still counts from the
+/// hit, because it exists to bound one iteration in flight.
+const DEFAULT_PONDER_CHARGE_PERCENT: u64 = 0;
+
 /// How much of `optimum` each recent root-move change adds, in percent. 0 turns
 /// the instability factor off, which is how it is A/B'd.
 ///
@@ -371,6 +388,8 @@ struct Options {
     table_megabytes: usize,
     move_overhead: Duration,
     ponder_enabled: bool,
+    /// See [`DEFAULT_PONDER_CHARGE_PERCENT`].
+    ponder_charge_percent: u64,
     soft_scale_percent: u64,
     max_scale_percent: u64,
     curve_percent: u64,
@@ -388,6 +407,7 @@ impl Default for Options {
             table_megabytes: DEFAULT_TABLE_MEGABYTES,
             move_overhead: Duration::from_millis(DEFAULT_MOVE_OVERHEAD_MS),
             ponder_enabled: false,
+            ponder_charge_percent: DEFAULT_PONDER_CHARGE_PERCENT,
             soft_scale_percent: DEFAULT_SOFT_SCALE_PERCENT,
             max_scale_percent: DEFAULT_MAX_SCALE_PERCENT,
             curve_percent: DEFAULT_CURVE_PERCENT,
@@ -442,6 +462,11 @@ impl Options {
             "panic scale" => {
                 if let Ok(percent) = value.parse::<u64>() {
                     self.panic_scale = percent.min(200);
+                }
+            }
+            "ponder charge" => {
+                if let Ok(percent) = value.parse::<u64>() {
+                    self.ponder_charge_percent = percent.min(100);
                 }
             }
             "soft scale" => {
@@ -688,6 +713,10 @@ pub fn run() -> io::Result<()> {
                 println!(
                     "option name Soft Scale type spin default {DEFAULT_SOFT_SCALE_PERCENT} \
                      min 10 max 200"
+                );
+                println!(
+                    "option name Ponder Charge type spin default \
+                     {DEFAULT_PONDER_CHARGE_PERCENT} min 0 max 100"
                 );
                 println!(
                     "option name Curve type spin default {DEFAULT_CURVE_PERCENT} \
@@ -1024,7 +1053,14 @@ fn search_and_report(
         let spent = if pondering {
             match PONDER_HIT_AT_MS.load(Ordering::Relaxed) {
                 NO_HIT => None,
-                hit_ms => Some(started.elapsed().saturating_sub(Duration::from_millis(hit_ms))),
+                hit_ms => {
+                    let since_hit =
+                        started.elapsed().saturating_sub(Duration::from_millis(hit_ms));
+                    // Plus whatever share of the ponder phase this move is
+                    // charged for. See `DEFAULT_PONDER_CHARGE_PERCENT`.
+                    let charged = hit_ms * options.ponder_charge_percent / 100;
+                    Some(since_hit + Duration::from_millis(charged))
+                }
             }
         } else if deadline.is_some() {
             Some(started.elapsed())

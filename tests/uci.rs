@@ -625,6 +625,34 @@ fn ponderhit_keeps_the_soft_bound() {
     );
 }
 
+/// `Ponder Charge 100` is Stockfish's rule: the time spent on the opponent's
+/// clock counts against the move's budget, so a hit that has already used it up
+/// answers at once and banks the rest of the clock for later moves. The option
+/// exists so the two rules can be A/B'd with one binary; this only pins that it
+/// does what it says.
+#[test]
+fn ponder_charge_spends_the_pondering_time() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("setoption name Move Overhead value 30");
+    engine.send("setoption name Ponder Charge value 100");
+    engine.send("position startpos");
+    // A 30s clock gives a soft bound well under a second, so two seconds of
+    // pondering has already spent it several times over.
+    engine.send("go ponder wtime 30000 btime 30000");
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    let elapsed = started.elapsed().as_millis();
+    assert_eq!(lines.last().unwrap().split_whitespace().nth(1).unwrap().len(), 4);
+    assert!(
+        elapsed < 1500,
+        "took {elapsed}ms after the hit; the pondering time was not charged"
+    );
+}
+
 /// A predicted reply can end the game. Pondering a position with no legal move
 /// must still answer when the GUI asks, rather than hanging on a search that
 /// never had a move to find. Here the prediction is Qh4 mate: the engine is
