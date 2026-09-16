@@ -1,5 +1,7 @@
 use crate::{chessboard::{Bitboard, Chessboard, SquareIndex}, move_list::Move};
 
+use super::legality::Legality;
+
 pub const KNIGHTS_MOVES_CAPACITY: usize = 10;
 
 // Define the knight move lookup table for each square on an 8x8 chessboard
@@ -30,19 +32,26 @@ pub fn knight_attacks_from_single_knight_bitboard(knight: Bitboard) -> Bitboard 
     knight_attacks(square)
 }
 
-pub fn white_knights_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn white_knights_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_knights = cb.white_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & targets;
+        let square = single_knight_bitboard.trailing_zeros() as usize;
+        // A pinned knight comes out with no moves at all: what it is allowed is
+        // the line it shares with the king, and no knight move stays on a line.
+        let attacks = knight_attacks(square)
+            & targets
+            & legality.allowed(single_knight_bitboard, square);
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_white_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_white_knight_move(single_knight_bitboard, single_attack_bitboard));
 
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }
@@ -52,20 +61,25 @@ pub fn white_knights_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, ta
 
 }
 
-pub fn black_knights_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn black_knights_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_knights = cb.black_knights;
 
     while remaining_knights != 0 {
         let single_knight_bitboard = remaining_knights & remaining_knights.wrapping_neg(); // Get the least significant knight
-        let attacks = knight_attacks_from_single_knight_bitboard(single_knight_bitboard) & targets;
+        let square = single_knight_bitboard.trailing_zeros() as usize;
+        let attacks = knight_attacks(square)
+            & targets
+            & legality.allowed(single_knight_bitboard, square);
 
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_black_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_black_knight_move(single_knight_bitboard, single_attack_bitboard));
 
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }

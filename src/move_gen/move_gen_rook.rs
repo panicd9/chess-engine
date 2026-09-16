@@ -1,5 +1,7 @@
 use crate::{chessboard::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS}, display::display_board, move_list::Move, utils::{calculate_sliding_attacks, reverse_bits}};
 
+use super::legality::Legality;
+
 // use super::{Bitboard, Chessboard, FILE_MASKS, RANK_MASKS};
 // use crate::r#move::Move;
 // use crate::piece::Piece;
@@ -67,22 +69,26 @@ pub fn all_rooks_attacks(occupancy: Bitboard, rooks: Bitboard) -> Bitboard {
     total_attacks
 }
 
-pub fn white_rooks_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn white_rooks_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_rooks = cb.white_rooks;
+    let occupancy = cb.get_occupancy();
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
-        let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & targets;
+        let square = single_rook_bitboard.trailing_zeros() as usize;
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard)
+            & targets
+            & legality.allowed(single_rook_bitboard, square);
         
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            // let mov = Move::new(cb, Piece::Rook, single_rook_bitboard, single_attack_bitboard);
-            let new_move = cb.make_white_rook_move(single_rook_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_white_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_white_rook_move(single_rook_bitboard, single_attack_bitboard));
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }
         
@@ -91,21 +97,26 @@ pub fn white_rooks_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targ
 
 }
 
-pub fn black_rooks_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, targets: Bitboard) {
+pub fn black_rooks_legal_moves_into(
+    cb: &Chessboard,
+    moves: &mut Vec<Move>,
+    targets: Bitboard,
+    legality: &Legality,
+) {
     let mut remaining_rooks = cb.black_rooks;
+    let occupancy = cb.get_occupancy();
 
     while remaining_rooks != 0 {
         let single_rook_bitboard = remaining_rooks & remaining_rooks.wrapping_neg(); // Get the least significant rook
-        let occupancy = cb.get_occupancy();
-        let attacks = single_rook_attacks(occupancy, single_rook_bitboard) & targets;
+        let square = single_rook_bitboard.trailing_zeros() as usize;
+        let attacks = single_rook_attacks(occupancy, single_rook_bitboard)
+            & targets
+            & legality.allowed(single_rook_bitboard, square);
         
         let mut remaining_attacks = attacks;
         while remaining_attacks != 0 {
             let single_attack_bitboard = remaining_attacks & remaining_attacks.wrapping_neg();
-            let new_move = cb.make_black_rook_move(single_rook_bitboard, single_attack_bitboard);
-            if !new_move.chessboard.is_black_king_under_attack() {
-                moves.push(new_move);
-            }
+            moves.push(cb.make_black_rook_move(single_rook_bitboard, single_attack_bitboard));
             remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
         }
 

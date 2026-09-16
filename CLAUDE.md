@@ -23,10 +23,13 @@ engine is unusable in them.
   helpers that build a new board per move. Copy-make: every move produces a
   whole new 184-byte board.
 - `move_gen/` — one module per piece, each with `*_legal_moves_into(cb, &mut Vec<Move>)`
-  writing into a buffer the caller owns. Legality is checked by making the move
-  and testing `is_*_king_under_attack`. `move_gen.rs` also has
-  `*_captures_into`, the capture-only path quiescence uses, and
-  `has_any_legal_move`, which tells a quiet position from stalemate.
+  writing into a buffer the caller owns. Legality is decided before a move is
+  made, by the masks in `move_gen/legality.rs`; see "Invariants". `move_gen.rs`
+  also has the two stages the search generates in -- `*_captures_with` (noisy:
+  captures, en passant, every promotion) and `*_quiets_with` (the rest,
+  castling included) -- plus `*_captures_into` for quiescence and
+  `has_any_legal_move`, which tells a quiet position from stalemate. The `_with`
+  forms take the `Legality` from the caller, so a node computes it once.
 - `move_gen/check_and_make_move.rs` — validates a move given from/to, for
   `Chessboard::make_move`. See "Known traps".
 - `search.rs` — negamax + alpha-beta + quiescence, killer ordering, repetition
@@ -46,6 +49,30 @@ There is no from/to anywhere. To name a move you diff two boards
 (`notation::describe_move`); to identify one cheaply inside the search you XOR
 the mover's occupancy before and after. Both are workarounds for the missing
 from/to.
+
+**Legality is decided by masks, not by making the move.** `legality.rs` works
+out once per position where a piece other than the king may land
+(`check_mask`), which pieces are pinned and to what line (`pinned`, `LINE`), and
+which squares the king may not step to (`danger`, built with our own king lifted
+off the board so a slider's ray reaches the square behind it). **En passant is
+the one exception** and keeps make-and-test: it takes two pieces off one rank,
+so it can uncover a check no mask describes, and in check it can answer by
+capturing the checking pawn, which `check_mask` would reject. Making every move
+to test it had been more than half the cost of generating one -- 20-24 ns
+against 16-19 ns to build the board -- and the masks were worth +27 Elo at
+identical node counts.
+
+**The search generates in two stages, and list order is part of move
+ordering.** A node builds the noisy moves first and the quiet ones only if
+nothing cut; four boards in five built at an interior node used to go
+unsearched. A quiet table move is the exception -- it must be searched first,
+so that node builds both stages up front. `next_move` breaks score ties by
+position in the list, so reordering what a generator emits changes the tree
+even when every move is still produced: the full generator keeps its order
+(pawns, knights, bishops, rooks, queens, king, castling) for that reason, and
+`equiv` is how to tell a change that only reorders from one that preserves
+behaviour. Staging moved the tree -- the quiet stage is scored later, with
+fresher history -- and was worth +49.5 Elo.
 
 **`piece_square` must agree with the bitboards.** It is a redundant 64-entry
 view, and the capture helpers read it to decide which piece to remove. When the
@@ -86,16 +113,26 @@ quiescence scored identically. Both are covered by `tests/uci.rs`.
   capture-promotion returned a quiet promotion on the wrong square, and en
   passant answered any request that reached it. **If you touch a branch there,
   check it compares against the requested destination and tests legality.**
-- `*_captures_into` duplicates `*_legal_moves_into` with the target mask
-  narrowed to enemy occupancy, and the pawn capture generator duplicates the
-  capture, promotion and en passant branches of the full pawn generator. This is
-  the same hazard as `check_and_make_move.rs` above: when the two drift,
-  quiescence silently searches the wrong set of moves and perft cannot see it,
-  because perft never calls the capture path. **Whatever the full generator
-  produces that scores at or above the capture threshold, the capture generator
-  must produce too.** All four quiet promotions score 6-9 and qualify; castling
-  scores 3 and does not. A first cut dropped the quiet promotions and lost a
-  mate; `tests/regressions.rs` caught it.
+- The two stages duplicate the full generator: `*_captures_with` narrows the
+  target mask to enemy occupancy, `*_quiets_with` to empty squares, and the pawn
+  capture and quiet generators copy branches of the full pawn generator. This is
+  the same hazard as `check_and_make_move.rs` above, twice over, and perft sees
+  none of it, because perft calls neither stage. Two rules, each tested in
+  `tests/regressions.rs`:
+  - **The stages partition the full generator exactly.** A move in neither is
+    one the search cannot find; a move in both is searched twice.
+    (`capture_and_quiet_stages_partition_the_full_generator`)
+  - **Whatever the full generator produces that scores at or above the
+    quiescence threshold, the capture stage produces too.** All four quiet
+    promotions score 6-9 and belong there; castling scores 3 and belongs to the
+    quiet stage. A first cut dropped the quiet promotions and lost a mate.
+    (`capture_generator_keeps_everything_quiescence_wants`)
+- Every generator applies the legality masks itself, through
+  `legality.allowed(piece, square)`. One that forgets produces illegal moves,
+  and if it is only a stage generator, perft still passes. **Check a new
+  generator test by reintroducing the bug it guards**: the first version of the
+  capture-stage test passed on a broken generator, because no fixture had a
+  free promotion push or a pinned pawn with a capture.
 - Quiescence must not read an empty move list as mate or stalemate. With
   captures only, empty means "nothing to capture". In check it generates
   everything, so empty really is mate; otherwise `has_any_legal_move` settles
@@ -121,8 +158,9 @@ quiescence scored identically. Both are covered by `tests/uci.rs`.
   the oracle for move generation; if it passes, generation is almost certainly
   correct.
 - `tests/regressions.rs` — one test per bug ever fixed, plus the
-  `piece_square` invariant and a describe/parse/make round trip over every legal
-  move in seven positions.
+  `piece_square` invariant, a describe/parse/make round trip over every legal
+  move in seven positions, and the two generation-stage rules in "Known
+  traps".
 - `tests/uci.rs` — drives the real binary over stdin/stdout.
 - `tests/fen_positions.rs` — billion-node perft, `#[ignore]`d.
 
