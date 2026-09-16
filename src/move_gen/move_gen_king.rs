@@ -39,7 +39,6 @@ pub fn white_king_legal_moves_into(
     legality: &Legality,
 ) {
     let king = cb.white_king;
-    let occupancy = cb.get_occupancy();
 
     // Normal king moves. `danger` already knows the king is not standing on
     // the square it is leaving, so a slider's ray reaches the square behind it
@@ -53,12 +52,19 @@ pub fn white_king_legal_moves_into(
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
 
-    // Castling moves. The passthrough squares include the one the king is
-    // standing on, so being in check is rejected by the same test. `danger`
-    // differs from `all_black_attacks()` only on squares this king shadows,
-    // and any such square implies its own square is attacked, so this answers
-    // exactly as the old test did -- for one attack map per position rather
-    // than one per castling side.
+}
+
+/// Castling, which is neither a capture nor reachable through the target mask,
+/// so it is generated on its own and belongs to the quiet stage.
+///
+/// The passthrough squares include the one the king is standing on, so being
+/// in check is rejected by the same test. `danger` differs from
+/// `all_black_attacks()` only on squares this king shadows, and any such square
+/// implies its own square is attacked, so this answers exactly as the old test
+/// did -- for one attack map per position rather than one per castling side.
+pub fn white_castling_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
+    let occupancy = cb.get_occupancy();
+
     if cb.white_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
         let are_kingside_castle_squares_empty = WHITE_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;
@@ -93,7 +99,6 @@ pub fn black_king_legal_moves_into(
     legality: &Legality,
 ) {
     let king = cb.black_king;
-    let occupancy = cb.get_occupancy();
 
     // Normal king moves. `danger` already knows the king is not standing on
     // the square it is leaving, so a slider's ray reaches the square behind it
@@ -107,12 +112,19 @@ pub fn black_king_legal_moves_into(
         remaining_attacks &= remaining_attacks - 1; // Remove the least significant attack
     }
 
-    // Castling moves. The passthrough squares include the one the king is
-    // standing on, so being in check is rejected by the same test. `danger`
-    // differs from `all_white_attacks()` only on squares this king shadows,
-    // and any such square implies its own square is attacked, so this answers
-    // exactly as the old test did -- for one attack map per position rather
-    // than one per castling side.
+}
+
+/// Castling, which is neither a capture nor reachable through the target mask,
+/// so it is generated on its own and belongs to the quiet stage.
+///
+/// The passthrough squares include the one the king is standing on, so being
+/// in check is rejected by the same test. `danger` differs from
+/// `all_white_attacks()` only on squares this king shadows, and any such square
+/// implies its own square is attacked, so this answers exactly as the old test
+/// did -- for one attack map per position rather than one per castling side.
+pub fn black_castling_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
+    let occupancy = cb.get_occupancy();
+
     if cb.black_can_castle_king_side {
         // Kingside castling: ensure the squares between the king and rook are empty
         let are_kingside_castle_squares_empty = BLACK_KING_CASTLE_EMPTY_SQUARES & occupancy == 0;

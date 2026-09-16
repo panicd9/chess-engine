@@ -217,7 +217,69 @@ pub fn black_pawns_legal_moves_into(cb: &Chessboard, moves: &mut Vec<Move>, lega
 
 }
 
-/// PROTOTYPE: the pawn moves quiescence keeps -- captures, capture-promotions
+
+/// The pawn moves the capture stage does not produce: the plain pushes.
+///
+/// Promotion pushes are absent on purpose. They score 6-9, at or above the
+/// threshold quiescence keeps, so `*_pawn_captures_into` produces them and
+/// generating them here as well would search each one twice. Together the two
+/// functions are exactly `*_pawns_legal_moves_into`, which
+/// `capture_and_quiet_stages_partition_the_full_generator` checks.
+pub fn white_pawn_quiets_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
+    let occupancy = cb.get_occupancy();
+
+    let mut remaining_pawns = cb.white_pawns;
+    while remaining_pawns != 0 {
+        let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+        let square = single_pawn.trailing_zeros() as usize;
+        let allowed = legality.allowed(single_pawn, square);
+
+        let forward = WHITE_PAWN_FORWARD_MOVES[square] & !occupancy;
+        if forward != 0 && forward & RANK_8 == 0 {
+            if forward & allowed != 0 {
+                moves.push(cb.make_white_pawn_forward_move(single_pawn, forward));
+            }
+
+            if (single_pawn & RANK_2) != 0 {
+                let double_forward = (single_pawn << 16) & !occupancy;
+                if double_forward & allowed != 0 {
+                    moves.push(cb.make_white_pawn_double_forward_move(single_pawn, double_forward));
+                }
+            }
+        }
+
+        remaining_pawns &= remaining_pawns - 1;
+    }
+}
+
+pub fn black_pawn_quiets_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {
+    let occupancy = cb.get_occupancy();
+
+    let mut remaining_pawns = cb.black_pawns;
+    while remaining_pawns != 0 {
+        let single_pawn = remaining_pawns & remaining_pawns.wrapping_neg();
+        let square = single_pawn.trailing_zeros() as usize;
+        let allowed = legality.allowed(single_pawn, square);
+
+        let forward = BLACK_PAWN_FORWARD_MOVES[square] & !occupancy;
+        if forward != 0 && forward & RANK_1 == 0 {
+            if forward & allowed != 0 {
+                moves.push(cb.make_black_pawn_forward_move(single_pawn, forward));
+            }
+
+            if (single_pawn & RANK_7) != 0 {
+                let double_forward = (single_pawn >> 16) & !occupancy;
+                if double_forward & allowed != 0 {
+                    moves.push(cb.make_black_pawn_double_forward_move(single_pawn, double_forward));
+                }
+            }
+        }
+
+        remaining_pawns &= remaining_pawns - 1;
+    }
+}
+
+/// The pawn moves quiescence keeps -- captures, capture-promotions
 /// and en passant. Quiet pushes (including quiet promotions) score below the
 /// capture threshold and are discarded, so they are never generated.
 pub fn white_pawn_captures_into(cb: &Chessboard, moves: &mut Vec<Move>, legality: &Legality) {

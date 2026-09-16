@@ -8,8 +8,9 @@ use move_gen_queen::{black_queens_legal_moves_into, white_queens_legal_moves_int
 use move_gen_rook::{black_rooks_legal_moves_into, white_rooks_legal_moves_into};
 
 use crate::{chessboard::{Chessboard, Color}, move_list::Move};
+use legality::Legality;
 use legality::{black_legality, white_legality};
-use move_gen_king::king_attacks;
+use move_gen_king::{black_castling_into, king_attacks, white_castling_into};
 
 pub mod move_gen_rook;
 pub mod move_gen_pawn;
@@ -99,34 +100,64 @@ pub fn white_legal_moves(cb: &Chessboard) -> Vec<Move> {
 }
 
 pub fn white_legal_moves_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    white_legal_moves_with(cb, out, &white_legality(cb));
+}
+
+/// Every legal move, in the order the generators have always produced them:
+/// pawns, knights, bishops, rooks, queens, king, castling. Move ordering
+/// breaks ties by position in the list, so the order is part of how the search
+/// behaves and is not to be rearranged casually.
+pub fn white_legal_moves_with(cb: &Chessboard, out: &mut Vec<Move>, legality: &Legality) {
     let targets = !cb.get_white_occupancy();
-    let legality = white_legality(cb);
     // Nothing but the king can answer two checks at once, so on a double check
     // the other five generators would run only to be masked down to nothing.
     if !legality.double_check() {
-        white_pawns_legal_moves_into(cb, out, &legality);
-        white_knights_legal_moves_into(cb, out, targets, &legality);
-        white_bishops_legal_moves_into(cb, out, targets, &legality);
-        white_rooks_legal_moves_into(cb, out, targets, &legality);
-        white_queens_legal_moves_into(cb, out, targets, &legality);
+        white_pawns_legal_moves_into(cb, out, legality);
+        white_knights_legal_moves_into(cb, out, targets, legality);
+        white_bishops_legal_moves_into(cb, out, targets, legality);
+        white_rooks_legal_moves_into(cb, out, targets, legality);
+        white_queens_legal_moves_into(cb, out, targets, legality);
     }
-    white_king_legal_moves_into(cb, out, targets, &legality);
+    white_king_legal_moves_into(cb, out, targets, legality);
+    white_castling_into(cb, out, legality);
 }
 
-/// PROTOTYPE: captures only for the non-pawn pieces; pawns still generate
-/// everything, so this is a lower bound on what a real capture generator saves.
-pub fn white_captures_into(cb: &Chessboard, out: &mut Vec<Move>) {
+/// The noisy stage: captures, en passant and every promotion -- the moves
+/// scoring at or above the threshold quiescence retains, and the ones a cutoff
+/// usually comes from.
+pub fn white_captures_with(cb: &Chessboard, out: &mut Vec<Move>, legality: &Legality) {
     let targets = cb.get_black_occupancy();
-    let legality = white_legality(cb);
-    // Only the king can answer a double check; see `white_legal_moves_into`.
+    // Only the king can answer a double check; see `white_legal_moves_with`.
     if !legality.double_check() {
-        move_gen_pawn::white_pawn_captures_into(cb, out, &legality);
-        white_knights_legal_moves_into(cb, out, targets, &legality);
-        white_bishops_legal_moves_into(cb, out, targets, &legality);
-        white_rooks_legal_moves_into(cb, out, targets, &legality);
-        white_queens_legal_moves_into(cb, out, targets, &legality);
+        move_gen_pawn::white_pawn_captures_into(cb, out, legality);
+        white_knights_legal_moves_into(cb, out, targets, legality);
+        white_bishops_legal_moves_into(cb, out, targets, legality);
+        white_rooks_legal_moves_into(cb, out, targets, legality);
+        white_queens_legal_moves_into(cb, out, targets, legality);
     }
-    white_king_legal_moves_into(cb, out, targets, &legality);
+    white_king_legal_moves_into(cb, out, targets, legality);
+}
+
+/// The quiet stage: everything the noisy stage does not produce. A promotion
+/// push is noisy and belongs there; castling is quiet and belongs here. The
+/// two together are exactly `white_legal_moves_with`, though not in that order --
+/// `capture_and_quiet_stages_partition_the_full_generator` holds them to it.
+pub fn white_quiets_with(cb: &Chessboard, out: &mut Vec<Move>, legality: &Legality) {
+    let targets = !cb.get_occupancy();
+    // Only the king can answer a double check; see `white_legal_moves_with`.
+    if !legality.double_check() {
+        move_gen_pawn::white_pawn_quiets_into(cb, out, legality);
+        white_knights_legal_moves_into(cb, out, targets, legality);
+        white_bishops_legal_moves_into(cb, out, targets, legality);
+        white_rooks_legal_moves_into(cb, out, targets, legality);
+        white_queens_legal_moves_into(cb, out, targets, legality);
+    }
+    white_king_legal_moves_into(cb, out, targets, legality);
+    white_castling_into(cb, out, legality);
+}
+
+pub fn white_captures_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    white_captures_with(cb, out, &white_legality(cb));
 }
 
 pub fn black_legal_moves(cb: &Chessboard) -> Vec<Move> {
@@ -136,29 +167,63 @@ pub fn black_legal_moves(cb: &Chessboard) -> Vec<Move> {
 }
 
 pub fn black_legal_moves_into(cb: &Chessboard, out: &mut Vec<Move>) {
+    black_legal_moves_with(cb, out, &black_legality(cb));
+}
+
+/// Every legal move, in the order the generators have always produced them:
+/// pawns, knights, bishops, rooks, queens, king, castling. Move ordering
+/// breaks ties by position in the list, so the order is part of how the search
+/// behaves and is not to be rearranged casually.
+pub fn black_legal_moves_with(cb: &Chessboard, out: &mut Vec<Move>, legality: &Legality) {
     let targets = !cb.get_black_occupancy();
-    let legality = black_legality(cb);
-    // Only the king can answer a double check; see `white_legal_moves_into`.
+    // Nothing but the king can answer two checks at once, so on a double check
+    // the other five generators would run only to be masked down to nothing.
     if !legality.double_check() {
-        black_pawns_legal_moves_into(cb, out, &legality);
-        black_knights_legal_moves_into(cb, out, targets, &legality);
-        black_bishops_legal_moves_into(cb, out, targets, &legality);
-        black_rooks_legal_moves_into(cb, out, targets, &legality);
-        black_queens_legal_moves_into(cb, out, targets, &legality);
+        black_pawns_legal_moves_into(cb, out, legality);
+        black_knights_legal_moves_into(cb, out, targets, legality);
+        black_bishops_legal_moves_into(cb, out, targets, legality);
+        black_rooks_legal_moves_into(cb, out, targets, legality);
+        black_queens_legal_moves_into(cb, out, targets, legality);
     }
-    black_king_legal_moves_into(cb, out, targets, &legality);
+    black_king_legal_moves_into(cb, out, targets, legality);
+    black_castling_into(cb, out, legality);
+}
+
+/// The noisy stage: captures, en passant and every promotion -- the moves
+/// scoring at or above the threshold quiescence retains, and the ones a cutoff
+/// usually comes from.
+pub fn black_captures_with(cb: &Chessboard, out: &mut Vec<Move>, legality: &Legality) {
+    let targets = cb.get_white_occupancy();
+    // Only the king can answer a double check; see `black_legal_moves_with`.
+    if !legality.double_check() {
+        move_gen_pawn::black_pawn_captures_into(cb, out, legality);
+        black_knights_legal_moves_into(cb, out, targets, legality);
+        black_bishops_legal_moves_into(cb, out, targets, legality);
+        black_rooks_legal_moves_into(cb, out, targets, legality);
+        black_queens_legal_moves_into(cb, out, targets, legality);
+    }
+    black_king_legal_moves_into(cb, out, targets, legality);
+}
+
+/// The quiet stage: everything the noisy stage does not produce. A promotion
+/// push is noisy and belongs there; castling is quiet and belongs here. The
+/// two together are exactly `black_legal_moves_with`, though not in that order --
+/// `capture_and_quiet_stages_partition_the_full_generator` holds them to it.
+pub fn black_quiets_with(cb: &Chessboard, out: &mut Vec<Move>, legality: &Legality) {
+    let targets = !cb.get_occupancy();
+    // Only the king can answer a double check; see `black_legal_moves_with`.
+    if !legality.double_check() {
+        move_gen_pawn::black_pawn_quiets_into(cb, out, legality);
+        black_knights_legal_moves_into(cb, out, targets, legality);
+        black_bishops_legal_moves_into(cb, out, targets, legality);
+        black_rooks_legal_moves_into(cb, out, targets, legality);
+        black_queens_legal_moves_into(cb, out, targets, legality);
+    }
+    black_king_legal_moves_into(cb, out, targets, legality);
+    black_castling_into(cb, out, legality);
 }
 
 pub fn black_captures_into(cb: &Chessboard, out: &mut Vec<Move>) {
-    let targets = cb.get_white_occupancy();
-    let legality = black_legality(cb);
-    // Only the king can answer a double check; see `white_legal_moves_into`.
-    if !legality.double_check() {
-        move_gen_pawn::black_pawn_captures_into(cb, out, &legality);
-        black_knights_legal_moves_into(cb, out, targets, &legality);
-        black_bishops_legal_moves_into(cb, out, targets, &legality);
-        black_rooks_legal_moves_into(cb, out, targets, &legality);
-        black_queens_legal_moves_into(cb, out, targets, &legality);
-    }
-    black_king_legal_moves_into(cb, out, targets, &legality);
+    black_captures_with(cb, out, &black_legality(cb));
 }
+

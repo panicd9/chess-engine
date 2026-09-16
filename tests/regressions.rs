@@ -782,3 +782,109 @@ fn capture_generator_keeps_everything_quiescence_wants() {
         }
     }
 }
+
+/// The two stages must partition the full generator exactly: every legal move
+/// in one of them, no move in both.
+///
+/// Staged generation searches the noisy moves first and only builds the quiet
+/// ones if nothing cut. That is only sound if the two sets add up. A move in
+/// neither is a move the search cannot find -- a missed mate, or a stalemate
+/// scored as a position. A move in both is searched twice, which is slower and
+/// double-counts its history credit.
+///
+/// Perft cannot see any of this: it calls neither stage. This is the same
+/// hazard as `capture_generator_keeps_everything_quiescence_wants`, one level
+/// further on.
+#[test]
+fn capture_and_quiet_stages_partition_the_full_generator() {
+    use chess_engine::move_gen::legality::{black_legality, white_legality};
+    use chess_engine::move_gen::{
+        black_captures_with, black_legal_moves_with, black_quiets_with, white_captures_with,
+        white_legal_moves_with, white_quiets_with,
+    };
+    use chess_engine::zobrist;
+    use std::collections::HashSet;
+
+    const POSITIONS: &[(&str, &str)] = &[
+        ("initial", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+        ("kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"),
+        ("kiwipete black", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1"),
+        ("endgame", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"),
+        ("promotions", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1"),
+        ("position 5", "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8"),
+        ("position 6", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10"),
+        ("position 6 black", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 b - - 0 10"),
+        ("in check", "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"),
+        ("pinned", "r2q1rk1/pP1p2pp/Q4n2/bbp1p3/Np6/1B3NBn/pPPP1PPP/R3K2R b KQ - 0 1"),
+        ("white promotion push", "7k/P7/8/8/8/8/8/K7 w - - 0 1"),
+        ("black promotion push", "k7/8/8/8/8/8/p7/7K b - - 0 1"),
+        ("castling both sides", "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"),
+        ("castling black", "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1"),
+        ("en passant", "8/8/3p4/KPp4r/1R3p1k/8/4P1P1/8 w - c6 0 3"),
+        ("double check", "3rkr2/8/8/8/8/8/4N3/4K3 b - - 0 1"),
+    ];
+
+    for (name, fen) in POSITIONS {
+        let cb = Chessboard::from_fen(fen).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let white = cb.side_to_move == Color::White;
+
+        let (mut full, mut captures, mut quiets) = (Vec::new(), Vec::new(), Vec::new());
+        if white {
+            let legality = white_legality(&cb);
+            white_legal_moves_with(&cb, &mut full, &legality);
+            white_captures_with(&cb, &mut captures, &legality);
+            white_quiets_with(&cb, &mut quiets, &legality);
+        } else {
+            let legality = black_legality(&cb);
+            black_legal_moves_with(&cb, &mut full, &legality);
+            black_captures_with(&cb, &mut captures, &legality);
+            black_quiets_with(&cb, &mut quiets, &legality);
+        }
+
+        let keys = |ms: &[chess_engine::move_list::Move]| -> Vec<u64> {
+            ms.iter().map(|m| zobrist::hash(&m.chessboard)).collect()
+        };
+        let (full_keys, capture_keys, quiet_keys) = (keys(&full), keys(&captures), keys(&quiets));
+
+        // Neither stage may produce the same move twice.
+        assert_eq!(
+            capture_keys.len(),
+            capture_keys.iter().collect::<HashSet<_>>().len(),
+            "{name}: the noisy stage produced a duplicate"
+        );
+        assert_eq!(
+            quiet_keys.len(),
+            quiet_keys.iter().collect::<HashSet<_>>().len(),
+            "{name}: the quiet stage produced a duplicate"
+        );
+
+        // Disjoint.
+        let noisy: HashSet<_> = capture_keys.iter().copied().collect();
+        for (key, m) in quiet_keys.iter().zip(&quiets) {
+            assert!(
+                !noisy.contains(key),
+                "{name}: a move scoring {} is in both stages and would be searched twice",
+                m.score
+            );
+        }
+
+        // And together exactly the full generator.
+        let staged: HashSet<_> = capture_keys.iter().chain(&quiet_keys).copied().collect();
+        let whole: HashSet<_> = full_keys.iter().copied().collect();
+        assert_eq!(whole.len(), full_keys.len(), "{name}: the full generator produced a duplicate");
+        for (key, m) in full_keys.iter().zip(&full) {
+            assert!(
+                staged.contains(key),
+                "{name}: neither stage produces a legal move scoring {} -- the search cannot find it",
+                m.score
+            );
+        }
+        assert_eq!(
+            staged.len(),
+            whole.len(),
+            "{name}: the stages produce {} moves against the full generator's {}",
+            staged.len(),
+            whole.len()
+        );
+    }
+}
