@@ -625,6 +625,82 @@ fn ponderhit_keeps_the_soft_bound() {
     );
 }
 
+/// A predicted reply can end the game. Pondering a position with no legal move
+/// must still answer when the GUI asks, rather than hanging on a search that
+/// never had a move to find. Here the prediction is Qh4 mate: the engine is
+/// pondering its own checkmate.
+#[test]
+fn ponder_on_a_position_with_no_move() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos moves f2f3 e7e5 g2g4 d8h4");
+    engine.send("go ponder wtime 10000 btime 10000");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let started = Instant::now();
+    engine.send("ponderhit");
+    let lines = engine.read_until("bestmove");
+    assert!(
+        started.elapsed().as_millis() < 2000,
+        "took {:?} to answer from a mated position",
+        started.elapsed()
+    );
+    assert_eq!(
+        lines.last().unwrap().split_whitespace().nth(1),
+        Some("0000"),
+        "a mated position has no move to play: {lines:?}"
+    );
+}
+
+/// `stop` immediately after `go ponder`, before the search has reported
+/// anything. The flag is read at every node, so this must come back at once --
+/// and with a legal move, because the GUI may be about to play it.
+#[test]
+fn stop_immediately_after_go_ponder() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos moves e2e4 e7e5 g1f3 b8c6");
+    engine.send("go ponder wtime 60000 btime 60000");
+    engine.send("stop");
+
+    let started = Instant::now();
+    let lines = engine.read_until("bestmove");
+    let mv = lines.last().unwrap().split_whitespace().nth(1).unwrap();
+    assert!(
+        started.elapsed().as_millis() < 1000,
+        "took {:?} to answer a stop sent straight after `go ponder`",
+        started.elapsed()
+    );
+    assert_eq!(mv.len(), 4, "answered `{mv}` rather than a move");
+}
+
+/// `ucinewgame` while pondering. It stops the search first -- so a `bestmove`
+/// for the abandoned ponder position comes out, which is what Stockfish does
+/// too -- and the engine must be ready for the next game straight after.
+#[test]
+fn ucinewgame_during_a_ponder_search() {
+    let mut engine = Engine::start();
+    engine.handshake();
+    engine.send("position startpos moves d2d4 d7d5 c2c4");
+    engine.send("go ponder wtime 60000 btime 60000");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    engine.send("ucinewgame");
+    engine.send("isready");
+    let lines = engine.read_until("readyok");
+    assert!(
+        lines.iter().filter(|l| l.starts_with("bestmove")).count() <= 1,
+        "more than one bestmove for one search: {lines:?}"
+    );
+
+    // The table was cleared under a running search; the next one must be sane.
+    let (mv, lines) = engine.bestmove("position startpos", "go depth 6");
+    assert_eq!(mv.len(), 4, "no move after ucinewgame mid-ponder");
+    assert!(
+        lines.iter().any(|l| l.starts_with("info depth 6")),
+        "the search after ucinewgame did not reach depth 6: {lines:?}"
+    );
+}
+
 /// The `ponder` token must be the reply from the PV of the last completed
 /// iteration, not whatever the table holds once the search has finished.
 ///
