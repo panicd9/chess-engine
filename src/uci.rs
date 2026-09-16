@@ -134,11 +134,14 @@ const DEFAULT_MAX_SCALE_PERCENT: u64 = 300;
 /// 100 -- Stockfish's rule: its clock runs from `go ponder`, so a hit that has
 /// already used the budget answers at once and banks the time for later moves.
 ///
-/// Which is worth more Elo is an open question, not a matter of correctness:
-/// one buys depth on the 42% of moves that hit, the other buys time everywhere
-/// else. The hard bound is unaffected either way -- it still counts from the
-/// hit, because it exists to bound one iteration in flight.
-const DEFAULT_PONDER_CHARGE_PERCENT: u64 = 0;
+/// 100, measured: **+27.9 +/- 18.5 Elo over 699 games** against 0, same binary
+/// both sides, 10+0.1 with pondering on (LOS 99.9%; stopped by hand before the
+/// SPRT concluded). Tapped, it takes hit moves from 0.19s to 0.15s and gives the
+/// time to plain moves, 0.10s to 0.13s, which then search a ply deeper (13
+/// against 12) while hit moves lose nothing -- they already had a whole ponder
+/// search behind them. The hard bound is unaffected either way -- it still
+/// counts from the hit, because it exists to bound one iteration in flight.
+const DEFAULT_PONDER_CHARGE_PERCENT: u64 = 100;
 
 /// How much of `optimum` each recent root-move change adds, in percent. 0 turns
 /// the instability factor off, which is how it is A/B'd.
