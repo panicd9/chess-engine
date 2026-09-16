@@ -843,12 +843,21 @@ pub fn quiescence_search_best_move(
     }
 
     let mut all_moves = pool::take();
-    let checked = in_check(cb, is_white_turn);
+    // One set of masks for the whole node: they say whether this position is in
+    // check, they are what the generator needs, and `has_any_legal_move` wants
+    // the same `danger` map again below. Asking three times over meant three
+    // attack tests on one board.
+    let legality = if is_white_turn {
+        crate::move_gen::legality::white_legality(cb)
+    } else {
+        crate::move_gen::legality::black_legality(cb)
+    };
+    let checked = legality.in_check();
     match (checked, is_white_turn) {
-        (true, true) => crate::move_gen::white_legal_moves_into(cb, &mut all_moves),
-        (true, false) => crate::move_gen::black_legal_moves_into(cb, &mut all_moves),
-        (false, true) => crate::move_gen::white_captures_into(cb, &mut all_moves),
-        (false, false) => crate::move_gen::black_captures_into(cb, &mut all_moves),
+        (true, true) => crate::move_gen::white_legal_moves_with(cb, &mut all_moves, &legality),
+        (true, false) => crate::move_gen::black_legal_moves_with(cb, &mut all_moves, &legality),
+        (false, true) => crate::move_gen::white_captures_with(cb, &mut all_moves, &legality),
+        (false, false) => crate::move_gen::black_captures_with(cb, &mut all_moves, &legality),
     }
 
     if all_moves.is_empty() {
@@ -858,7 +867,7 @@ pub fn quiescence_search_best_move(
         // a quiet position looks like, and also what stalemate looks like. The
         // two score differently (stalemate is a draw however the evaluation
         // reads), so they have to be told apart.
-        if checked || !crate::move_gen::has_any_legal_move(cb, is_white_turn) {
+        if checked || !crate::move_gen::has_any_legal_move_with(cb, is_white_turn, &legality) {
             return (terminal_score(cb, is_white_turn, ply as u32), best_board);
         }
         return (best_score, best_board);

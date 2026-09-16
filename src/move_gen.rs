@@ -62,10 +62,15 @@ pub mod legality;
 /// full generator is only reached when the king is boxed in, which is also the
 /// only case where the answer might be "no".
 pub fn has_any_legal_move(cb: &Chessboard, is_white: bool) -> bool {
-    let (legality, king, own) = if is_white {
-        (white_legality(cb), cb.white_king, cb.get_white_occupancy())
+    let legality = if is_white { white_legality(cb) } else { black_legality(cb) };
+    has_any_legal_move_with(cb, is_white, &legality)
+}
+
+pub fn has_any_legal_move_with(cb: &Chessboard, is_white: bool, legality: &Legality) -> bool {
+    let (king, own) = if is_white {
+        (cb.white_king, cb.get_white_occupancy())
     } else {
-        (black_legality(cb), cb.black_king, cb.get_black_occupancy())
+        (cb.black_king, cb.get_black_occupancy())
     };
 
     if king_attacks(king) & !own & !legality.danger != 0 {
@@ -77,9 +82,9 @@ pub fn has_any_legal_move(cb: &Chessboard, is_white: bool) -> bool {
     // generated.
     let mut buf = Vec::with_capacity(32);
     if is_white {
-        white_legal_moves_into(cb, &mut buf);
+        white_legal_moves_with(cb, &mut buf, legality);
     } else {
-        black_legal_moves_into(cb, &mut buf);
+        black_legal_moves_with(cb, &mut buf, legality);
     }
     !buf.is_empty()
 }
