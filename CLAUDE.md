@@ -148,6 +148,31 @@ thinking time by scheduler luck. Prefix the match with `taskset -c 4-11`
 (affinity is inherited by every child) and the spread drops to 1-2%. Eight is
 therefore the maximum homogeneous concurrency.
 
+**Ponder only where the change can meet it.** The bot ponders; cutechess does
+not unless each `-engine` is given `ponder`. With pondering both engines of a
+game search at once, so the match needs `-concurrency 4` on `taskset -c 4-11`,
+which halves throughput: 441-463 games/h at 10+0.1 against 935 without.
+
+- **Ponder on** for time management (budgets, the soft/hard bound, pacing,
+  `Ponder Charge`), the ponder path (`ponderhit`, `stop`, the ponder move), and
+  anything that changes the reported PV the ponder token is read from. A
+  ponderhit bug that ran every hit move to the hard bound survived every match
+  that set those bounds, because none of them pondered.
+- **Ponder off** for eval, search, pruning, move generation and speed. Both sides
+  get the same ponder benefit, and it costs double.
+
+Before a build goes to the bot, run the ponder tests in `tests/uci.rs` and a short
+smoke match with `chess-engine-bot/watch/uciwatch.py` as the engine command,
+checking the hit rate, the clock taken after a hit against a plain move, and
+that nothing hangs. The ponderhit bug was plain in that timing data and invisible
+to Elo at 10+0.1.
+
+Ponder self-play is still not the bot's regime. Hits run ~68% in self-play
+against ~42% live, so a ponder A/B exaggerates anything on the hit path; and
+10+0.1 hides long-control behaviour -- the same bug took 2.1x the clock in the
+bot's rapid games and ~5% at 10+0.1. For time-management changes the time
+control matters as much as pondering does.
+
 A short principal variation means the table is too small, not that the walk is
 broken: `principal_variation` follows stored moves, and a position whose entry
 has been evicted ends the line. At depth 11 from a Ruy Lopez the PV is 2 plies
