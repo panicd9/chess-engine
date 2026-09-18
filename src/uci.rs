@@ -798,6 +798,12 @@ pub fn run() -> io::Result<()> {
                     ("KingAttackRook", 3, 0, 50),
                     ("KingAttackQueen", 8, 0, 50),
                     ("KingAttackScale", 56, 0, 400),
+                    // Pieces we attack with something cheaper, and minors that
+                    // cannot be driven off. See `eval::threats`, `eval::outposts`.
+                    ("ThreatByPawn", 35, 0, 200),
+                    ("ThreatByMinor", 22, 0, 200),
+                    ("KnightOutpost", 18, 0, 100),
+                    ("BishopOutpost", 6, 0, 100),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }

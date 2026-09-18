@@ -57,6 +57,10 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("KingAttackRook", weights::get(&weights::KING_ATTACK_ROOK), 0, 50),
         ("KingAttackQueen", weights::get(&weights::KING_ATTACK_QUEEN), 0, 50),
         ("KingAttackScale", weights::get(&weights::KING_ATTACK_SCALE), 0, 400),
+        ("ThreatByPawn", weights::get(&weights::THREAT_BY_PAWN), 0, 200),
+        ("ThreatByMinor", weights::get(&weights::THREAT_BY_MINOR), 0, 200),
+        ("KnightOutpost", weights::get(&weights::KNIGHT_OUTPOST), 0, 100),
+        ("BishopOutpost", weights::get(&weights::BISHOP_OUTPOST), 0, 100),
     ]
 }
 
