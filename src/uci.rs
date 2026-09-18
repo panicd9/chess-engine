@@ -783,6 +783,9 @@ pub fn run() -> io::Result<()> {
                     ("PassedKingUs", 2, 0, 100),
                     ("PassedFreePath", 23, 0, 200),
                     ("PassedPathOffset", 17, 0, 41),
+                    // How much evaluation survives a material configuration
+                    // that cannot be won; 64 is off. See `eval::drawish_scale`.
+                    ("DrawishScale", 8, 0, 64),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }

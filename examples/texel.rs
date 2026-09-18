@@ -48,6 +48,7 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("PassedKingUs", weights::get(&weights::PASSED_KING_US), 0, 100),
         ("PassedFreePath", weights::get(&weights::PASSED_FREE_PATH), 0, 200),
         ("PassedPathOffset", weights::get(&weights::PASSED_PATH_OFFSET), 0, 41),
+        ("DrawishScale", weights::get(&weights::DRAWISH_SCALE), 0, 64),
     ]
 }
 

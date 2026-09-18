@@ -132,6 +132,20 @@ pub mod weights {
     pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(23);
     pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(17);
 
+    /// How much of the evaluation survives in a material configuration that
+    /// cannot be won, in sixty-fourths. 64 leaves the evaluation untouched and
+    /// is the setting that reproduces the pre-term engine exactly.
+    ///
+    /// Without this the evaluation is confidently wrong about whole classes of
+    /// drawn endgame, because material is counted and the mating potential is
+    /// not. In `7iixcekP` the engine reached
+    /// `1R6/8/8/4KN2/r7/8/k7/8 w - - 34 70` -- rook and knight against rook, a
+    /// textbook draw -- and scored it **+380** static, +366 searched, where
+    /// Stockfish 19 says +11. Over the 80 games of build `0d213881`, 204 of the
+    /// 633 positions we over-read by 200cp or more were endgames of seven
+    /// pieces or fewer.
+    pub static DRAWISH_SCALE: AtomicI32 = AtomicI32::new(8);
+
     /// Set a weight by name. Unknown names are ignored, as UCI requires.
     /// Returns whether the name was recognised.
     pub fn set(name: &str, value: i32) -> bool {
@@ -149,6 +163,7 @@ pub mod weights {
             "passedkingus" => &PASSED_KING_US,
             "passedfreepath" => &PASSED_FREE_PATH,
             "passedpathoffset" => &PASSED_PATH_OFFSET,
+            "drawishscale" => &DRAWISH_SCALE,
             _ => return false,
         };
         target.store(value, Ordering::Relaxed);
@@ -163,11 +178,81 @@ pub mod weights {
 
 pub fn evaluate(cb: &Chessboard) -> i32 {
     let attacks = PieceAttacks::new(cb);
-    eval(&cb.piece_square, &EVAL_TABLES)
+    let raw = eval(&cb.piece_square, &EVAL_TABLES)
         + mobility(&attacks)
         + king_safety(cb)
         + crate::pawn_hash::passed_pawns(cb)
-        + passed_pawn_pieces(cb, &attacks)
+        + passed_pawn_pieces(cb, &attacks);
+
+    match drawish_scale(cb, raw) {
+        64 => raw,
+        scale => raw * scale / 64,
+    }
+}
+
+/// Middlegame piece values, only ever used to compare one side's material with
+/// the other's. They are the PeSTO values the tables are built from; nothing
+/// here depends on them being exactly right, only on a bishop being worth more
+/// than a knight is short of a rook.
+const KNIGHT_MATERIAL: i32 = 337;
+const BISHOP_MATERIAL: i32 = 365;
+const ROOK_MATERIAL: i32 = 477;
+const QUEEN_MATERIAL: i32 = 1025;
+
+/// How much of the evaluation to keep, in sixty-fourths.
+///
+/// One rule, the standard one: **a side with no pawns and less than a bishop of
+/// extra material cannot force mate.** That covers rook and knight against rook,
+/// rook and bishop against rook, rook against minor, minor against minor, and a
+/// lone minor against a bare king -- every one of which the material term scores
+/// as a comfortable advantage and every one of which is a draw.
+///
+/// The side the rule is asked about is **the side the evaluation favours**, not
+/// the side with more material. Those differ, and using material instead is
+/// wrong: in king and pawn against king and knight the knight is the greater
+/// material, but it is the *pawn* that has the winning chances, and scaling that
+/// position down crushes a real advantage. `tests/regressions.rs::
+/// a_stopped_passed_pawn_is_worth_less_than_a_free_one` fails on exactly that
+/// mistake, which is how it was found.
+///
+/// Deliberately *not* covered, because each needs its own shape and would be
+/// tested separately: opposite-coloured bishops, the wrong rook pawn with a
+/// bishop, and rook-and-pawn against rook. Two knights against a bare king is a
+/// draw this rule misses (640 of extra material clears the bishop threshold);
+/// it is rare enough to leave.
+#[inline]
+fn drawish_scale(cb: &Chessboard, raw: i32) -> i32 {
+    // The side being asked about must have no pawns, so when it has one the
+    // answer is always 64. Testing that first keeps the popcounts out of every
+    // middlegame evaluation, which is worth 4-8% of search speed.
+    let white_winning = match raw.signum() {
+        1 => true,
+        -1 => false,
+        _ => return 64,
+    };
+    if white_winning && cb.white_pawns != 0 || !white_winning && cb.black_pawns != 0 {
+        return 64;
+    }
+    let scale = weights::get(&weights::DRAWISH_SCALE);
+    if scale == 64 {
+        return 64; // Term switched off: skip the work entirely.
+    }
+
+    let npm = |knights: u64, bishops: u64, rooks: u64, queens: u64| {
+        knights.count_ones() as i32 * KNIGHT_MATERIAL
+            + bishops.count_ones() as i32 * BISHOP_MATERIAL
+            + rooks.count_ones() as i32 * ROOK_MATERIAL
+            + queens.count_ones() as i32 * QUEEN_MATERIAL
+    };
+    let white = npm(cb.white_knights, cb.white_bishops, cb.white_rooks, cb.white_queens);
+    let black = npm(cb.black_knights, cb.black_bishops, cb.black_rooks, cb.black_queens);
+
+    let edge = if white_winning { white - black } else { black - white };
+    if edge <= BISHOP_MATERIAL {
+        scale
+    } else {
+        64
+    }
 }
 
 /// The squares each side's knights, bishops, rooks and queens attack, computed
