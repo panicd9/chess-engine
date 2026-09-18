@@ -788,9 +788,16 @@ pub fn run() -> io::Result<()> {
                     ("DrawishScale", 8, 0, 64),
                     // Rooks on files the pawns have left, and the bishop pair;
                     // see `eval::rook_files` and `eval::bishop_pair`.
-                    ("RookOpenFile", 20, 0, 100),
-                    ("RookSemiOpenFile", 10, 0, 100),
-                    ("BishopPair", 30, 0, 100),
+                    ("RookOpenFile", 10, 0, 100),
+                    ("RookSemiOpenFile", 4, 0, 100),
+                    ("BishopPair", 18, 0, 100),
+                    // Pressure on the enemy king; Scale 0 switches it off.
+                    // See `eval::king_attack`.
+                    ("KingAttackKnight", 6, 0, 50),
+                    ("KingAttackBishop", 5, 0, 50),
+                    ("KingAttackRook", 3, 0, 50),
+                    ("KingAttackQueen", 8, 0, 50),
+                    ("KingAttackScale", 56, 0, 400),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }

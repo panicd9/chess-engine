@@ -15,6 +15,7 @@
 //! Every weight here is a hand-picked guess in centipawns, not a tuned value.
 
 use crate::chessboard::{Chessboard, FILE_MASKS};
+use crate::move_gen::move_gen_king::king_attacks;
 use crate::piece_square_tables::{eval, EVAL_TABLES};
 
 /// The weights these terms use, all in centipawns.
@@ -132,16 +133,40 @@ pub mod weights {
     pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(23);
     pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(17);
 
+    /// How dangerous each attacker is on a square next to the enemy king.
+    ///
+    /// The only king safety before this was `MISSING_SHIELD_PAWN`, which counts
+    /// the three pawns in front of a castled king and so **caps at 15cp in
+    /// total** -- a king about to be mated and a king perfectly safe differed
+    /// by at most that. These weight the squares of the king's zone that each
+    /// enemy piece type attacks, and the total is squared, so pieces arriving
+    /// together cost far more than the sum of their parts, which is how an
+    /// attack actually works.
+    pub static KING_ATTACK_KNIGHT: AtomicI32 = AtomicI32::new(6);
+    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(5);
+    pub static KING_ATTACK_ROOK: AtomicI32 = AtomicI32::new(3);
+    pub static KING_ATTACK_QUEEN: AtomicI32 = AtomicI32::new(8);
+
+    /// Scales the squared attack total, in 1024ths. **Zero switches the whole
+    /// term off**, which is the setting the A/B measures against.
+    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(56);
+
     /// Per rook on a file with no pawns at all, and on one with only enemy
     /// pawns. Both are things the piece-square tables cannot see: a rook's
     /// worth depends on the pawns around it, not on the square it stands on.
-    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(20);
-    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(10);
+    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(10);
+    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(4);
 
     /// For holding both bishops. The tables score each bishop alone, so the
     /// pair's extra worth -- covering both colour complexes -- has nowhere else
     /// to live.
-    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(30);
+    ///
+    /// Fitted by `examples/texel` against game results and cross-validated each
+    /// way: 9/4/18 trained on big3 (holdout -0.10%), 10/5/18 trained on
+    /// quiet-labeled (holdout -0.25%). The first guesses were 20/10/30 -- the
+    /// fit wants about half of each, which is the same direction every earlier
+    /// fit here has gone.
+    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(18);
 
     /// How much of the evaluation survives in a material configuration that
     /// cannot be won, in sixty-fourths. 64 leaves the evaluation untouched and
@@ -178,6 +203,11 @@ pub mod weights {
             "rookopenfile" => &ROOK_OPEN_FILE,
             "rooksemiopenfile" => &ROOK_SEMI_OPEN_FILE,
             "bishoppair" => &BISHOP_PAIR,
+            "kingattackknight" => &KING_ATTACK_KNIGHT,
+            "kingattackbishop" => &KING_ATTACK_BISHOP,
+            "kingattackrook" => &KING_ATTACK_ROOK,
+            "kingattackqueen" => &KING_ATTACK_QUEEN,
+            "kingattackscale" => &KING_ATTACK_SCALE,
             _ => return false,
         };
         target.store(value, Ordering::Relaxed);
@@ -198,12 +228,61 @@ pub fn evaluate(cb: &Chessboard) -> i32 {
         + crate::pawn_hash::passed_pawns(cb)
         + passed_pawn_pieces(cb, &attacks)
         + rook_files(cb)
-        + bishop_pair(cb);
+        + bishop_pair(cb)
+        + king_attack(cb, &attacks);
 
     match drawish_scale(cb, raw) {
         64 => raw,
         scale => raw * scale / 64,
     }
+}
+
+/// Pressure on the enemy king, from white's point of view.
+///
+/// For each side, count the squares of the enemy king's zone -- the king square
+/// and the eight around it -- that each of our piece types attacks, weight them
+/// by piece, and **square the total**. Squaring is the point: one piece near a
+/// king is nothing, three is a mating attack, and a linear term cannot say so.
+///
+/// The attack sets are the ones [`PieceAttacks`] already computed for mobility,
+/// so this costs four ands and four popcounts per side. They are raw attacks
+/// that do not exclude our own pieces, which is what is wanted here -- a queen
+/// defended through a knight still bears on the king.
+///
+/// Because the sets are unions per piece type, two knights attacking the same
+/// square count once. That understates a crowded attack and is the price of
+/// reusing the mobility sets.
+///
+/// Switched off in the endgame on the same test as [`king_safety`]: with little
+/// heavy material there is no attack to fear and the king wants to be active.
+#[inline]
+fn king_attack(cb: &Chessboard, attacks: &PieceAttacks) -> i32 {
+    let scale = weights::get(&weights::KING_ATTACK_SCALE);
+    if scale == 0 {
+        return 0;
+    }
+    let heavy = (cb.white_queens | cb.black_queens | cb.white_rooks | cb.black_rooks).count_ones();
+    if heavy < 2 {
+        return 0;
+    }
+
+    let weight = [
+        weights::get(&weights::KING_ATTACK_KNIGHT),
+        weights::get(&weights::KING_ATTACK_BISHOP),
+        weights::get(&weights::KING_ATTACK_ROOK),
+        weights::get(&weights::KING_ATTACK_QUEEN),
+    ];
+    let zone = |king: u64| if king == 0 { 0 } else { king | king_attacks(king) };
+    let units = |a: &[u64; 4], z: u64| -> i32 {
+        a.iter()
+            .zip(weight)
+            .map(|(squares, w)| (squares & z).count_ones() as i32 * w)
+            .sum()
+    };
+
+    let white = units(&attacks.white, zone(cb.black_king));
+    let black = units(&attacks.black, zone(cb.white_king));
+    (white * white - black * black) * scale / 1024
 }
 
 /// Rooks on files the pawns have left, from white's point of view.

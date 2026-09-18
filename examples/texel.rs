@@ -52,6 +52,11 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("RookOpenFile", weights::get(&weights::ROOK_OPEN_FILE), 0, 100),
         ("RookSemiOpenFile", weights::get(&weights::ROOK_SEMI_OPEN_FILE), 0, 100),
         ("BishopPair", weights::get(&weights::BISHOP_PAIR), 0, 100),
+        ("KingAttackKnight", weights::get(&weights::KING_ATTACK_KNIGHT), 0, 50),
+        ("KingAttackBishop", weights::get(&weights::KING_ATTACK_BISHOP), 0, 50),
+        ("KingAttackRook", weights::get(&weights::KING_ATTACK_ROOK), 0, 50),
+        ("KingAttackQueen", weights::get(&weights::KING_ATTACK_QUEEN), 0, 50),
+        ("KingAttackScale", weights::get(&weights::KING_ATTACK_SCALE), 0, 400),
     ]
 }
 
