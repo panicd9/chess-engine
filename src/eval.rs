@@ -132,6 +132,17 @@ pub mod weights {
     pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(23);
     pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(17);
 
+    /// Per rook on a file with no pawns at all, and on one with only enemy
+    /// pawns. Both are things the piece-square tables cannot see: a rook's
+    /// worth depends on the pawns around it, not on the square it stands on.
+    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(20);
+    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(10);
+
+    /// For holding both bishops. The tables score each bishop alone, so the
+    /// pair's extra worth -- covering both colour complexes -- has nowhere else
+    /// to live.
+    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(30);
+
     /// How much of the evaluation survives in a material configuration that
     /// cannot be won, in sixty-fourths. 64 leaves the evaluation untouched and
     /// is the setting that reproduces the pre-term engine exactly.
@@ -164,6 +175,9 @@ pub mod weights {
             "passedfreepath" => &PASSED_FREE_PATH,
             "passedpathoffset" => &PASSED_PATH_OFFSET,
             "drawishscale" => &DRAWISH_SCALE,
+            "rookopenfile" => &ROOK_OPEN_FILE,
+            "rooksemiopenfile" => &ROOK_SEMI_OPEN_FILE,
+            "bishoppair" => &BISHOP_PAIR,
             _ => return false,
         };
         target.store(value, Ordering::Relaxed);
@@ -182,12 +196,50 @@ pub fn evaluate(cb: &Chessboard) -> i32 {
         + mobility(&attacks)
         + king_safety(cb)
         + crate::pawn_hash::passed_pawns(cb)
-        + passed_pawn_pieces(cb, &attacks);
+        + passed_pawn_pieces(cb, &attacks)
+        + rook_files(cb)
+        + bishop_pair(cb);
 
     match drawish_scale(cb, raw) {
         64 => raw,
         scale => raw * scale / 64,
     }
+}
+
+/// Rooks on files the pawns have left, from white's point of view.
+///
+/// A file is **open** when neither side has a pawn on it and **semi-open** for
+/// a side when only the enemy has one: the rook sees down it either way, but an
+/// enemy pawn can still be advanced to block or to be defended, so the two are
+/// worth different amounts and are weighted separately.
+///
+/// The files holding a side's pawns are that side's pawns smeared over the
+/// whole board vertically, which is two shifts-and-ors each way, so this costs
+/// two fills and a handful of masks however many rooks there are.
+#[inline]
+fn rook_files(cb: &Chessboard) -> i32 {
+    let white_pawn_files = fill_north(fill_south(cb.white_pawns));
+    let black_pawn_files = fill_north(fill_south(cb.black_pawns));
+    let open = !(white_pawn_files | black_pawn_files);
+
+    let count = |b: u64| b.count_ones() as i32;
+    let open_diff = count(cb.white_rooks & open) - count(cb.black_rooks & open);
+    // Semi-open for us means no pawn of ours and at least one of theirs.
+    let semi_diff = count(cb.white_rooks & !white_pawn_files & black_pawn_files)
+        - count(cb.black_rooks & !black_pawn_files & white_pawn_files);
+
+    open_diff * weights::get(&weights::ROOK_OPEN_FILE)
+        + semi_diff * weights::get(&weights::ROOK_SEMI_OPEN_FILE)
+}
+
+/// Holding both bishops, from white's point of view.
+///
+/// Counting two bishops rather than two of opposite colours is the usual
+/// simplification: a same-coloured pair only arises from an underpromotion.
+#[inline]
+fn bishop_pair(cb: &Chessboard) -> i32 {
+    let pair = |b: u64| (b.count_ones() >= 2) as i32;
+    (pair(cb.white_bishops) - pair(cb.black_bishops)) * weights::get(&weights::BISHOP_PAIR)
 }
 
 /// Middlegame piece values, only ever used to compare one side's material with

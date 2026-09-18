@@ -49,6 +49,9 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("PassedFreePath", weights::get(&weights::PASSED_FREE_PATH), 0, 200),
         ("PassedPathOffset", weights::get(&weights::PASSED_PATH_OFFSET), 0, 41),
         ("DrawishScale", weights::get(&weights::DRAWISH_SCALE), 0, 64),
+        ("RookOpenFile", weights::get(&weights::ROOK_OPEN_FILE), 0, 100),
+        ("RookSemiOpenFile", weights::get(&weights::ROOK_SEMI_OPEN_FILE), 0, 100),
+        ("BishopPair", weights::get(&weights::BISHOP_PAIR), 0, 100),
     ]
 }
 

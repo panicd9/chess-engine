@@ -786,6 +786,11 @@ pub fn run() -> io::Result<()> {
                     // How much evaluation survives a material configuration
                     // that cannot be won; 64 is off. See `eval::drawish_scale`.
                     ("DrawishScale", 8, 0, 64),
+                    // Rooks on files the pawns have left, and the bishop pair;
+                    // see `eval::rook_files` and `eval::bishop_pair`.
+                    ("RookOpenFile", 20, 0, 100),
+                    ("RookSemiOpenFile", 10, 0, 100),
+                    ("BishopPair", 30, 0, 100),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }
