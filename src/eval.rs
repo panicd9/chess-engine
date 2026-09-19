@@ -16,7 +16,7 @@
 
 use crate::chessboard::{Chessboard, FILE_MASKS};
 use crate::move_gen::move_gen_king::king_attacks;
-use crate::piece_square_tables::{eval, EVAL_TABLES};
+use crate::piece_square_tables::{eval, EVAL_TABLES, MG_VALUE};
 
 /// The weights these terms use, all in centipawns.
 ///
@@ -434,15 +434,6 @@ fn bishop_pair(cb: &Chessboard) -> i32 {
     (pair(cb.white_bishops) - pair(cb.black_bishops)) * weights::get(&weights::BISHOP_PAIR)
 }
 
-/// Middlegame piece values, only ever used to compare one side's material with
-/// the other's. They are the PeSTO values the tables are built from; nothing
-/// here depends on them being exactly right, only on a bishop being worth more
-/// than a knight is short of a rook.
-const KNIGHT_MATERIAL: i32 = 337;
-const BISHOP_MATERIAL: i32 = 365;
-const ROOK_MATERIAL: i32 = 477;
-const QUEEN_MATERIAL: i32 = 1025;
-
 /// How much of the evaluation to keep, in sixty-fourths.
 ///
 /// One rule, the standard one: **a side with no pawns and less than a bishop of
@@ -483,16 +474,16 @@ fn drawish_scale(cb: &Chessboard, raw: i32) -> i32 {
     }
 
     let npm = |knights: u64, bishops: u64, rooks: u64, queens: u64| {
-        knights.count_ones() as i32 * KNIGHT_MATERIAL
-            + bishops.count_ones() as i32 * BISHOP_MATERIAL
-            + rooks.count_ones() as i32 * ROOK_MATERIAL
-            + queens.count_ones() as i32 * QUEEN_MATERIAL
+        knights.count_ones() as i32 * MG_VALUE[1]
+            + bishops.count_ones() as i32 * MG_VALUE[2]
+            + rooks.count_ones() as i32 * MG_VALUE[3]
+            + queens.count_ones() as i32 * MG_VALUE[4]
     };
     let white = npm(cb.white_knights, cb.white_bishops, cb.white_rooks, cb.white_queens);
     let black = npm(cb.black_knights, cb.black_bishops, cb.black_rooks, cb.black_queens);
 
     let edge = if white_winning { white - black } else { black - white };
-    if edge <= BISHOP_MATERIAL {
+    if edge <= MG_VALUE[2] {
         scale
     } else {
         64

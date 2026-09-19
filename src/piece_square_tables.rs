@@ -7,10 +7,16 @@ lazy_static! {
 }
 
 /// Midgame piece values for Pawn, Knight, Bishop, Rook, Queen, King.
-const MG_VALUE: [i32; 6] = [82, 337, 365, 477, 1025, 0];
+///
+/// **This is the engine's single source of truth for what a piece is worth.**
+/// The tables below are these values plus a per-square offset, so anything
+/// elsewhere that needs a piece value -- delta pruning's queen, the drawish
+/// material test -- must read it from here rather than write its own copy. Two
+/// hand-written copies had already drifted from it before this was made public.
+pub const MG_VALUE: [i32; 6] = [82, 337, 365, 477, 1025, 0];
 // const MG_VALUE: [i32; 6] = [82, 339, 365, 477, 1025, 0];
-/// Endgame piece values.
-const EG_VALUE: [i32; 6] = [94, 281, 297, 512, 936, 0];
+/// Endgame piece values. See [`MG_VALUE`] on why these are public.
+pub const EG_VALUE: [i32; 6] = [94, 281, 297, 512, 936, 0];
 
 const MG_PAWN_TABLE: [i32; 64] = [
        0,   0,   0,   0,   0,   0,  0,   0,
