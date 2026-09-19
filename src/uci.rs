@@ -774,23 +774,23 @@ pub fn run() -> io::Result<()> {
                     ("RookMobility", 4, 0, 30),
                     ("QueenMobility", 3, 0, 30),
                     ("KingShield", 8, 0, 100),
-                    ("PassedPawnScale", 108, 0, 400),
+                    ("PassedPawnScale", 96, 0, 400),
                     // Adopted after +31.0 at 10+0.1 and +36.4 at 40+0.4; see
                     // `eval::weights`. Must match the statics there.
-                    ("DoubledPawn", 22, 0, 100),
+                    ("DoubledPawn", 21, 0, 100),
                     ("IsolatedHalfOpenPawn", 20, 0, 100),
                     // What the pieces let a passed pawn do; see
                     // `eval::passed_pawn_pieces`. Must match the statics there.
                     ("PassedKingThem", 11, 0, 100),
                     ("PassedKingUs", 3, 0, 100),
                     ("PassedFreePath", 24, 0, 200),
-                    ("PassedPathOffset", 9, 0, 41),
+                    ("PassedPathOffset", 7, 0, 41),
                     // How much evaluation survives a material configuration
                     // that cannot be won; 64 is off. See `eval::drawish_scale`.
                     ("DrawishScale", 7, 0, 64),
                     // Rooks on files the pawns have left, and the bishop pair;
                     // see `eval::rook_files` and `eval::bishop_pair`.
-                    ("RookOpenFile", 20, 0, 100),
+                    ("RookOpenFile", 19, 0, 100),
                     ("RookSemiOpenFile", 13, 0, 100),
                     ("BishopPair", 32, 0, 100),
                     // Pressure on the enemy king; Scale 0 switches it off.
@@ -800,12 +800,6 @@ pub fn run() -> io::Result<()> {
                     ("KingAttackRook", 3, 0, 50),
                     ("KingAttackQueen", 8, 0, 50),
                     ("KingAttackScale", 62, 0, 400),
-                    // Pieces we attack with something cheaper, and minors that
-                    // cannot be driven off. See `eval::threats`, `eval::outposts`.
-                    ("ThreatByPawn", 33, 0, 200),
-                    ("ThreatByMinor", 28, 0, 200),
-                    ("KnightOutpost", 18, 0, 100),
-                    ("BishopOutpost", 4, 0, 100),
                     // Search margins, in evaluation units. See `search::margins`.
                     ("FutilityMargin", 120, 0, 600),
                     ("DeltaMargin", 200, 0, 800),
