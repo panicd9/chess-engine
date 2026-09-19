@@ -1202,7 +1202,7 @@ const FUTILITY_MAX_DEPTH: u32 = 3;
 /// alpha even after winning the piece is not worth searching.
 const DELTA_MARGIN: i32 = 200;
 /// Value of the most valuable piece that can be captured, for delta pruning.
-const QUEEN_VALUE: i32 = 900;
+const QUEEN_VALUE: i32 = crate::piece_square_tables::MG_VALUE[4];
 
 /// How much shallower the null-move verification search runs. Two plies is the
 /// usual choice: deep enough to be meaningful, shallow enough to be cheap.

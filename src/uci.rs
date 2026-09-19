@@ -783,6 +783,27 @@ pub fn run() -> io::Result<()> {
                     ("PassedKingUs", 2, 0, 100),
                     ("PassedFreePath", 23, 0, 200),
                     ("PassedPathOffset", 17, 0, 41),
+                    // How much evaluation survives a material configuration
+                    // that cannot be won; 64 is off. See `eval::drawish_scale`.
+                    ("DrawishScale", 8, 0, 64),
+                    // Rooks on files the pawns have left, and the bishop pair;
+                    // see `eval::rook_files` and `eval::bishop_pair`.
+                    ("RookOpenFile", 10, 0, 100),
+                    ("RookSemiOpenFile", 4, 0, 100),
+                    ("BishopPair", 18, 0, 100),
+                    // Pressure on the enemy king; Scale 0 switches it off.
+                    // See `eval::king_attack`.
+                    ("KingAttackKnight", 6, 0, 50),
+                    ("KingAttackBishop", 5, 0, 50),
+                    ("KingAttackRook", 3, 0, 50),
+                    ("KingAttackQueen", 8, 0, 50),
+                    ("KingAttackScale", 56, 0, 400),
+                    // Pieces we attack with something cheaper, and minors that
+                    // cannot be driven off. See `eval::threats`, `eval::outposts`.
+                    ("ThreatByPawn", 35, 0, 200),
+                    ("ThreatByMinor", 22, 0, 200),
+                    ("KnightOutpost", 18, 0, 100),
+                    ("BishopOutpost", 6, 0, 100),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }

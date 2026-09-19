@@ -48,6 +48,19 @@ fn spec() -> Vec<(&'static str, i32, i32, i32)> {
         ("PassedKingUs", weights::get(&weights::PASSED_KING_US), 0, 100),
         ("PassedFreePath", weights::get(&weights::PASSED_FREE_PATH), 0, 200),
         ("PassedPathOffset", weights::get(&weights::PASSED_PATH_OFFSET), 0, 41),
+        ("DrawishScale", weights::get(&weights::DRAWISH_SCALE), 0, 64),
+        ("RookOpenFile", weights::get(&weights::ROOK_OPEN_FILE), 0, 100),
+        ("RookSemiOpenFile", weights::get(&weights::ROOK_SEMI_OPEN_FILE), 0, 100),
+        ("BishopPair", weights::get(&weights::BISHOP_PAIR), 0, 100),
+        ("KingAttackKnight", weights::get(&weights::KING_ATTACK_KNIGHT), 0, 50),
+        ("KingAttackBishop", weights::get(&weights::KING_ATTACK_BISHOP), 0, 50),
+        ("KingAttackRook", weights::get(&weights::KING_ATTACK_ROOK), 0, 50),
+        ("KingAttackQueen", weights::get(&weights::KING_ATTACK_QUEEN), 0, 50),
+        ("KingAttackScale", weights::get(&weights::KING_ATTACK_SCALE), 0, 400),
+        ("ThreatByPawn", weights::get(&weights::THREAT_BY_PAWN), 0, 200),
+        ("ThreatByMinor", weights::get(&weights::THREAT_BY_MINOR), 0, 200),
+        ("KnightOutpost", weights::get(&weights::KNIGHT_OUTPOST), 0, 100),
+        ("BishopOutpost", weights::get(&weights::BISHOP_OUTPOST), 0, 100),
     ]
 }
 
