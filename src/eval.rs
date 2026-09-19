@@ -15,7 +15,10 @@
 //! Every weight here is a hand-picked guess in centipawns, not a tuned value.
 
 use crate::chessboard::{Chessboard, FILE_MASKS};
+use crate::move_gen::move_gen_bishop::single_bishop_attacks;
 use crate::move_gen::move_gen_king::king_attacks;
+use crate::move_gen::move_gen_knight::knight_attacks_from_single_knight_bitboard;
+use crate::move_gen::move_gen_rook::single_rook_attacks;
 use crate::piece_square_tables::{eval, EVAL_TABLES, MG_VALUE};
 
 /// The weights these terms use, all in centipawns.
@@ -142,14 +145,29 @@ pub mod weights {
     /// enemy piece type attacks, and the total is squared, so pieces arriving
     /// together cost far more than the sum of their parts, which is how an
     /// attack actually works.
-    pub static KING_ATTACK_KNIGHT: AtomicI32 = AtomicI32::new(6);
-    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(8);
-    pub static KING_ATTACK_ROOK: AtomicI32 = AtomicI32::new(3);
-    pub static KING_ATTACK_QUEEN: AtomicI32 = AtomicI32::new(8);
+    pub static KING_ATTACK_KNIGHT: AtomicI32 = AtomicI32::new(50);
+    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(96);
+    pub static KING_ATTACK_ROOK: AtomicI32 = AtomicI32::new(93);
+    pub static KING_ATTACK_QUEEN: AtomicI32 = AtomicI32::new(22);
 
-    /// Scales the squared attack total, in 1024ths. **Zero switches the whole
+    /// Scales the danger penalty, in sixty-fourths. **Zero switches the whole
     /// term off**, which is the setting the A/B measures against.
-    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(62);
+    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(30);
+
+    /// Per safe check by each piece type, Stockfish 15's `SafeCheck` halved to
+    /// this engine's units as a starting point (it uses 805/650/1071/730 for a
+    /// single check of each type, and roughly 1.5x for several).
+    pub static CHECK_KNIGHT: AtomicI32 = AtomicI32::new(400);
+    pub static CHECK_BISHOP: AtomicI32 = AtomicI32::new(325);
+    pub static CHECK_ROOK: AtomicI32 = AtomicI32::new(535);
+    pub static CHECK_QUEEN: AtomicI32 = AtomicI32::new(365);
+
+    /// Per square of the king ring an enemy piece attacks (Stockfish: 69).
+    pub static KING_RING_ATTACKS: AtomicI32 = AtomicI32::new(69);
+
+    /// Subtracted from the danger when the attacker has no queen. Stockfish's
+    /// single largest king-safety line, worth ~24 Elo there.
+    pub static KING_NO_QUEEN: AtomicI32 = AtomicI32::new(873);
 
     /// Per rook on a file with no pawns at all, and on one with only enemy
     /// pawns. Both are things the piece-square tables cannot see: a rook's
@@ -210,6 +228,12 @@ pub mod weights {
             "kingattackrook" => &KING_ATTACK_ROOK,
             "kingattackqueen" => &KING_ATTACK_QUEEN,
             "kingattackscale" => &KING_ATTACK_SCALE,
+            "checkknight" => &CHECK_KNIGHT,
+            "checkbishop" => &CHECK_BISHOP,
+            "checkrook" => &CHECK_ROOK,
+            "checkqueen" => &CHECK_QUEEN,
+            "kingringattacks" => &KING_RING_ATTACKS,
+            "kingnoqueen" => &KING_NO_QUEEN,
             _ => return false,
         };
         target.store(value, Ordering::Relaxed);
@@ -259,24 +283,38 @@ pub fn evaluate(cb: &Chessboard) -> i32 {
     }
 }
 
-/// Pressure on the enemy king, from white's point of view.
+/// Pressure on the enemy king, from white's point of view. The shapes are
+/// Stockfish 15's `Evaluation::king()`; the magnitudes are refitted, as they
+/// were for [`passed_pawn_pieces`].
 ///
-/// For each side, count the squares of the enemy king's zone -- the king square
-/// and the eight around it -- that each of our piece types attacks, weight them
-/// by piece, and **square the total**. Squaring is the point: one piece near a
-/// king is nothing, three is a mating attack, and a linear term cannot say so.
+/// The first version of this counted king-zone squares attacked by each enemy
+/// piece type and squared the total. That is only the `kingAttackersCount *
+/// kingAttackersWeight` line below, which Stockfish's own annotations put at
+/// ~10 Elo out of its king term. It also weighted the queen near the top, and
+/// Stockfish weights the queen **lowest of all** -- 14 against a knight's 76 --
+/// because a queen sweeping across open lines sees many squares near a king
+/// without threatening anything. The queen's danger is in the *checks* she can
+/// give, which is a separate line.
 ///
-/// The attack sets are the ones [`PieceAttacks`] already computed for mobility,
-/// so this costs four ands and four popcounts per side. They are raw attacks
-/// that do not exclude our own pieces, which is what is wanted here -- a queen
-/// defended through a knight still bears on the king.
+/// What is ported, with Stockfish's own Elo notes:
 ///
-/// Because the sets are unions per piece type, two knights attacking the same
-/// square count once. That understates a crowded attack and is the price of
-/// reusing the mobility sets.
+/// - **No enemy queen: a large discount** (~24 Elo, its biggest single line).
+///   Free to compute and the main thing the old version missed.
+/// - **Safe checks** by rook, queen, bishop and knight (~4+ Elo). A check is
+///   safe when the checking square is not defended by us. Two slider
+///   computations from our own king square answer all four.
+/// - **Attackers and their weight** (~10 Elo), now with Stockfish's weights.
+/// - **Flank attacks and defence** (~5 Elo).
 ///
-/// Switched off in the endgame on the same test as [`king_safety`]: with little
-/// heavy material there is no attack to fear and the king wants to be active.
+/// What is deliberately **not** ported, because each needs the set of squares
+/// attacked *twice*, which this evaluation does not build: weak squares in the
+/// king ring (~15 Elo) and unsafe checks (~4 Elo). Building double-attack sets
+/// means walking every piece individually, which measured **21% of search
+/// speed** when tried for a much smaller gain. Blockers-for-king (~2 Elo) needs
+/// pin detection, which lives in the move generator, not here.
+///
+/// The danger total is turned into a penalty by Stockfish's own transform:
+/// nothing below a threshold, then quadratic.
 #[inline]
 fn king_attack(cb: &Chessboard, attacks: &PieceAttacks) -> i32 {
     let scale = weights::get(&weights::KING_ATTACK_SCALE);
@@ -287,25 +325,114 @@ fn king_attack(cb: &Chessboard, attacks: &PieceAttacks) -> i32 {
     if heavy < 2 {
         return 0;
     }
+    // From white's point of view: danger to the black king is a bonus, danger
+    // to our own is a penalty.
+    danger_for(cb, attacks, true) - danger_for(cb, attacks, false)
+}
 
-    let weight = [
+/// The danger to one king, as a positive penalty. `black_king` picks whose king
+/// is under attack, so the caller subtracts one from the other.
+#[inline]
+fn danger_for(cb: &Chessboard, attacks: &PieceAttacks, black_king: bool) -> i32 {
+    let (king, them, them_pawn, us_all, them_all, them_queens) = if black_king {
+        (cb.black_king, &attacks.white, attacks.white_pawn, attacks.black_all,
+         attacks.white_all, cb.white_queens)
+    } else {
+        (cb.white_king, &attacks.black, attacks.black_pawn, attacks.white_all,
+         attacks.black_all, cb.black_queens)
+    };
+    if king == 0 {
+        return 0;
+    }
+    let ring = king | king_attacks(king);
+    // If nothing of theirs touches the ring there is no attack to score, and no
+    // check either: a check attacks the king's own square, which is in the ring.
+    // This is what keeps the term affordable -- most nodes stop here.
+    if them_all & ring == 0 {
+        return 0;
+    }
+    let occupancy = cb.get_occupancy();
+
+    // Attackers on the ring, and how much of it they cover.
+    let w = [
         weights::get(&weights::KING_ATTACK_KNIGHT),
         weights::get(&weights::KING_ATTACK_BISHOP),
         weights::get(&weights::KING_ATTACK_ROOK),
         weights::get(&weights::KING_ATTACK_QUEEN),
     ];
-    let zone = |king: u64| if king == 0 { 0 } else { king | king_attacks(king) };
-    let units = |a: &[u64; 4], z: u64| -> i32 {
-        a.iter()
-            .zip(weight)
-            .map(|(squares, w)| (squares & z).count_ones() as i32 * w)
-            .sum()
-    };
+    let mut attackers = 0;
+    let mut attacker_weight = 0;
+    let mut ring_attacks = 0;
+    for i in 0..4 {
+        let hits = (them[i] & ring).count_ones() as i32;
+        if hits > 0 {
+            attackers += 1;
+            attacker_weight += w[i];
+            ring_attacks += hits;
+        }
+    }
+    // Pawn attacks count towards the ring but carry no attacker weight, as in
+    // Stockfish, where KingAttackWeights[PAWN] is zero.
+    ring_attacks += (them_pawn & ring).count_ones() as i32;
 
-    let white = units(&attacks.white, zone(cb.black_king));
-    let black = units(&attacks.black, zone(cb.white_king));
-    (white * white - black * black) * scale / 1024
+    // A check is safe when we do not defend the square it comes from.
+    let their_pieces = if black_king { cb.get_white_occupancy() } else { cb.get_black_occupancy() };
+    let safe = !us_all & !their_pieces;
+    // Each ray set is only needed if they actually have a piece that could
+    // check along it; a magic lookup is not free.
+    let rook_rays = if them[2] | them[3] != 0 { single_rook_attacks(occupancy, king) } else { 0 };
+    let bishop_rays = if them[1] | them[3] != 0 { single_bishop_attacks(occupancy, king) } else { 0 };
+    let knight_rays = if them[0] != 0 { knight_attacks_from_single_knight_bitboard(king) } else { 0 };
+    let mut danger = 0;
+    let sc = |b: u64, one: i32, many: i32| -> i32 {
+        match b.count_ones() {
+            0 => 0,
+            1 => one,
+            _ => many,
+        }
+    };
+    let rook_checks = rook_rays & them[2] & safe;
+    let queen_checks = (rook_rays | bishop_rays) & them[3] & safe & !rook_checks;
+    let bishop_checks = bishop_rays & them[1] & safe & !queen_checks;
+    let knight_checks = knight_rays & them[0] & safe;
+    danger += sc(rook_checks, weights::get(&weights::CHECK_ROOK), weights::get(&weights::CHECK_ROOK) * 3 / 2);
+    danger += sc(queen_checks, weights::get(&weights::CHECK_QUEEN), weights::get(&weights::CHECK_QUEEN) * 3 / 2);
+    danger += sc(bishop_checks, weights::get(&weights::CHECK_BISHOP), weights::get(&weights::CHECK_BISHOP) * 3 / 2);
+    danger += sc(knight_checks, weights::get(&weights::CHECK_KNIGHT), weights::get(&weights::CHECK_KNIGHT) * 3 / 2);
+
+    // The king's own flank, in our half of the board.
+    let file = (king.trailing_zeros() % 8) as usize;
+    let flank = KING_FLANK[file] & if black_king { BLACK_CAMP } else { WHITE_CAMP };
+    let flank_attack = (them_all & flank).count_ones() as i32;
+    let flank_defense = (us_all & flank).count_ones() as i32;
+
+    danger += attackers * attacker_weight
+        + weights::get(&weights::KING_RING_ATTACKS) * ring_attacks
+        + 3 * flank_attack * flank_attack / 8
+        - weights::get(&weights::KING_NO_QUEEN) * (them_queens == 0) as i32
+        - 4 * flank_defense
+        + 37;
+
+    if danger <= 100 {
+        return 0;
+    }
+    danger * danger / 4096 * weights::get(&weights::KING_ATTACK_SCALE) / 64
 }
+
+/// Stockfish's king-flank file masks: the three files around the king, widened
+/// at the edges so that a king on the a-file still has a three-file flank.
+const KING_FLANK: [u64; 8] = {
+    const QS: u64 = 0x0F0F_0F0F_0F0F_0F0F; // files a-d
+    const CF: u64 = 0x3C3C_3C3C_3C3C_3C3C; // files c-f
+    const KS: u64 = 0xF0F0_F0F0_F0F0_F0F0; // files e-h
+    const FD: u64 = 0x0808_0808_0808_0808; // file d
+    const FE: u64 = 0x1010_1010_1010_1010; // file e
+    [QS ^ FD, QS, QS, CF, CF, KS, KS, KS ^ FE]
+};
+/// Everything but the three ranks furthest from each side's back rank, which
+/// is Stockfish's `Camp`: ranks 1-5 for White, 4-8 for Black.
+const WHITE_CAMP: u64 = 0x0000_00FF_FFFF_FFFF; // ranks 1-5
+const BLACK_CAMP: u64 = 0xFFFF_FFFF_FF00_0000; // ranks 4-8
 
 /// Rooks on files the pawns have left, from white's point of view.
 ///
@@ -405,24 +532,40 @@ fn drawish_scale(cb: &Chessboard, raw: i32) -> i32 {
 struct PieceAttacks {
     white: [u64; 4],
     black: [u64; 4],
+    /// Pawn attacks, and everything each side attacks including pawns and king.
+    /// The king-danger term needs "is this square defended at all", which the
+    /// per-type sets alone cannot answer.
+    white_pawn: u64,
+    black_pawn: u64,
+    white_all: u64,
+    black_all: u64,
 }
 
 impl PieceAttacks {
     #[inline]
     fn new(cb: &Chessboard) -> Self {
+        let white = [
+            cb.white_knights_attacks(),
+            cb.white_bishops_attacks(),
+            cb.white_rooks_attacks(),
+            cb.white_queens_attacks(),
+        ];
+        let black = [
+            cb.black_knights_attacks(),
+            cb.black_bishops_attacks(),
+            cb.black_rooks_attacks(),
+            cb.black_queens_attacks(),
+        ];
+        let white_pawn = ((cb.white_pawns << 9) & !FILE_MASKS[0])
+            | ((cb.white_pawns << 7) & !FILE_MASKS[7]);
+        let black_pawn = ((cb.black_pawns >> 7) & !FILE_MASKS[0])
+            | ((cb.black_pawns >> 9) & !FILE_MASKS[7]);
+        let wk = if cb.white_king == 0 { 0 } else { king_attacks(cb.white_king) };
+        let bk = if cb.black_king == 0 { 0 } else { king_attacks(cb.black_king) };
         PieceAttacks {
-            white: [
-                cb.white_knights_attacks(),
-                cb.white_bishops_attacks(),
-                cb.white_rooks_attacks(),
-                cb.white_queens_attacks(),
-            ],
-            black: [
-                cb.black_knights_attacks(),
-                cb.black_bishops_attacks(),
-                cb.black_rooks_attacks(),
-                cb.black_queens_attacks(),
-            ],
+            white_all: white[0] | white[1] | white[2] | white[3] | white_pawn | wk,
+            black_all: black[0] | black[1] | black[2] | black[3] | black_pawn | bk,
+            white, black, white_pawn, black_pawn,
         }
     }
 }
