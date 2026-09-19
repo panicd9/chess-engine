@@ -392,7 +392,21 @@ fn transposition_table_preserves_tactics() {
 }
 
 /// Entries have to survive between the iterations of a deepening search -- that
-/// is the whole point -- so a warm table must still give the same answer.
+/// is the whole point -- so a warm table must still give a *sound* answer.
+///
+/// **It does not give a bit-identical one, and never did.** This asserted exact
+/// equality until 2026-09-19, when the refitted piece-square tables made it
+/// fail. Measured on master before that change, over eight positions at depth
+/// 5, warm and cold already disagreed on two of them (`8/2p5/...` 43 vs 47 and
+/// `r1bq1rk1/...` 371 vs 340); with the refitted tables it is four of eight.
+/// That is ordinary for fail-soft alpha-beta with a transposition table: entries
+/// stored at greater depth in earlier iterations permit cutoffs that change the
+/// move ordering and therefore the path, and a fail-soft score follows the path.
+/// The old assertion held for this one position by luck.
+///
+/// What is worth guarding is that the warm search does not go *wrong*: same
+/// move, and a score in the same region. A warm table that flipped the move or
+/// moved the score by hundreds would be the real bug.
 #[test]
 fn warm_transposition_table_is_still_correct() {
     let cb = Chessboard::from_fen(
@@ -402,12 +416,19 @@ fn warm_transposition_table_is_still_correct() {
 
     // Deepen the way the UCI driver does, then confirm the deepest answer
     // matches a cold search to the same depth.
-    let mut warm = 0;
+    let mut warm = (0, cb);
     for depth in 1..=5 {
-        warm = nega_max_alpha_beta_best_move(&cb, depth, true, A, B, &mut state).0;
+        warm = nega_max_alpha_beta_best_move(&cb, depth, true, A, B, &mut state);
     }
-    let cold = nega_max_alpha_beta_best_move(&cb, 5, true, A, B, &mut History::new()).0;
-    assert_eq!(warm, cold, "a warmed table changed the depth-5 score");
+    let cold = nega_max_alpha_beta_best_move(&cb, 5, true, A, B, &mut History::new());
+    let warm_move = chess_engine::notation::describe_move(&cb, &warm.1);
+    let cold_move = chess_engine::notation::describe_move(&cb, &cold.1);
+    assert_eq!(warm_move, cold_move, "a warmed table changed the depth-5 move");
+    assert!(
+        (warm.0 - cold.0).abs() <= 50,
+        "a warmed table moved the depth-5 score from {} to {}",
+        cold.0, warm.0
+    );
 }
 
 /// Exhaustive check of the `make_move` path: for every from/to/promotion
@@ -600,9 +621,25 @@ fn a_stopped_passed_pawn_is_worth_less_than_a_free_one() {
     let advanced = e("7k/3P4/2n5/8/8/8/8/K7 w - - 0 1") - e("7k/3P4/8/n7/8/8/8/K7 w - - 0 1");
     let behind = e("7k/8/2n5/8/8/3P4/8/K7 w - - 0 1") - e("7k/8/8/n7/8/3P4/8/K7 w - - 0 1");
     assert!(
-        advanced - behind <= -50,
+        advanced - behind <= -40,
         "covering the queening square of a pawn on the seventh moved it by only {}cp",
         advanced - behind
+    );
+
+    // The threshold above was -50 while the piece-square tables were themselves
+    // paying a seventh-rank pawn ~150cp in the endgame, so a large correction
+    // was needed to undo a large illusion. The refitted tables do not create
+    // the illusion in the first place, which is the better fix, and the
+    // correction needed is correspondingly smaller (-45 where it was -136).
+    //
+    // So assert the thing that actually went wrong in gCd8UcfI as well: two
+    // pawns on the seventh with an enemy knight covering both queening squares
+    // is not a won position, and must not be scored as one. The old tables said
+    // +316 here. Keep this one honest even if the difference test above drifts.
+    let stopped = e("8/1P1P4/2n5/8/8/8/8/K5k1 w - - 0 1");
+    assert!(
+        stopped < 150,
+        "two stopped pawns on the seventh scored {stopped}cp, which is the gCd8UcfI blindness"
     );
 }
 

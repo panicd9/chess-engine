@@ -251,6 +251,28 @@ pub mod weights {
     }
 }
 
+/// The evaluation split into the part the piece-square tables contribute, the
+/// part every other term contributes, and the drawish scale applied to their
+/// sum -- so that `evaluate` is `(pst + rest) * scale / 64`.
+///
+/// Only the tuner uses this. Fitting the tables needs the rest held constant
+/// while the tables move, and the rest cannot be recovered from `evaluate`
+/// alone once the scale has divided through it.
+pub fn evaluate_split(cb: &Chessboard) -> (i32, i32, i32) {
+    let attacks = PieceAttacks::new(cb);
+    let pst = eval(&cb.piece_square, &EVAL_TABLES);
+    let rest = mobility(&attacks)
+        + king_safety(cb)
+        + crate::pawn_hash::passed_pawns(cb)
+        + passed_pawn_pieces(cb, &attacks)
+        + rook_files(cb)
+        + bishop_pair(cb)
+        + king_attack(cb, &attacks)
+        + threats(cb, &attacks)
+        + outposts(cb);
+    (pst, rest, drawish_scale(cb, pst + rest))
+}
+
 pub fn evaluate(cb: &Chessboard) -> i32 {
     let attacks = PieceAttacks::new(cb);
     let raw = eval(&cb.piece_square, &EVAL_TABLES)
