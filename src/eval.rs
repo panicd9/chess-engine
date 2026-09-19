@@ -53,7 +53,7 @@ pub mod weights {
     /// most surprising part of the fit: counting missing pawns is a crude proxy
     /// for king safety, and overpaying for it makes the engine hold pawns in
     /// front of its king that are worth more elsewhere.
-    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(5);
+    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(8);
 
     /// Penalty per pawn beyond the first on a file, and per isolated pawn on a
     /// file with no enemy pawn.
@@ -80,8 +80,8 @@ pub mod weights {
     /// They are the two features that survive a change of corpus: top-ranked
     /// against both zurichess `quiet-labeled` and our own game positions, at both
     /// oracle depths. Nothing else in that study does.
-    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(18);
-    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(12);
+    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(22);
+    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(20);
 
     /// Scales the passed pawn bonus, as a percentage. 100 leaves the by-rank
     /// table below unchanged.
@@ -90,7 +90,7 @@ pub mod weights {
     /// regressing `evaluate()` against Stockfish 19 over 66k quiet positions
     /// found the passed-pawn term over-generous by ~16cp per pawn, on top of
     /// what the piece-square tables already pay an advanced pawn.
-    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(84);
+    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(108);
 
     /// How far along a passed pawn's path the pieces let it go. See
     /// [`super::passed_pawn_pieces`]; these scale Stockfish 15's classical
@@ -128,10 +128,10 @@ pub mod weights {
     /// Both runs stopped early -- the first by its SPRT, the second on a
     /// favourable reading of a planned 800 -- so the magnitudes lean high. The
     /// sign is not in doubt at either control.
-    pub static PASSED_KING_THEM: AtomicI32 = AtomicI32::new(8);
-    pub static PASSED_KING_US: AtomicI32 = AtomicI32::new(2);
-    pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(23);
-    pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(17);
+    pub static PASSED_KING_THEM: AtomicI32 = AtomicI32::new(11);
+    pub static PASSED_KING_US: AtomicI32 = AtomicI32::new(3);
+    pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(24);
+    pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(9);
 
     /// How dangerous each attacker is on a square next to the enemy king.
     ///
@@ -143,19 +143,19 @@ pub mod weights {
     /// together cost far more than the sum of their parts, which is how an
     /// attack actually works.
     pub static KING_ATTACK_KNIGHT: AtomicI32 = AtomicI32::new(6);
-    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(5);
+    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(8);
     pub static KING_ATTACK_ROOK: AtomicI32 = AtomicI32::new(3);
     pub static KING_ATTACK_QUEEN: AtomicI32 = AtomicI32::new(8);
 
     /// Scales the squared attack total, in 1024ths. **Zero switches the whole
     /// term off**, which is the setting the A/B measures against.
-    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(56);
+    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(62);
 
     /// Per rook on a file with no pawns at all, and on one with only enemy
     /// pawns. Both are things the piece-square tables cannot see: a rook's
     /// worth depends on the pawns around it, not on the square it stands on.
-    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(10);
-    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(4);
+    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(20);
+    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(13);
 
     /// For holding both bishops. The tables score each bishop alone, so the
     /// pair's extra worth -- covering both colour complexes -- has nowhere else
@@ -166,15 +166,15 @@ pub mod weights {
     /// quiet-labeled (holdout -0.25%). The first guesses were 20/10/30 -- the
     /// fit wants about half of each, which is the same direction every earlier
     /// fit here has gone.
-    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(18);
+    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(32);
 
     /// Per enemy piece attacked by a pawn, and per enemy piece attacked by a
     /// piece worth less than it. Nothing in the evaluation saw a hanging or
     /// harried piece before this: the tables score where a piece stands, the
     /// mobility term counts squares, and neither notices that the piece is
     /// about to be won.
-    pub static THREAT_BY_PAWN: AtomicI32 = AtomicI32::new(35);
-    pub static THREAT_BY_MINOR: AtomicI32 = AtomicI32::new(22);
+    pub static THREAT_BY_PAWN: AtomicI32 = AtomicI32::new(33);
+    pub static THREAT_BY_MINOR: AtomicI32 = AtomicI32::new(28);
 
     /// Per knight or bishop on a square defended by one of our pawns, in enemy
     /// territory, that no enemy pawn can ever attack.
@@ -193,7 +193,7 @@ pub mod weights {
     /// barely moves (-0.01%), so this is a consistent weight rather than a
     /// demonstrated gain; the A/B is what settles it.
     pub static KNIGHT_OUTPOST: AtomicI32 = AtomicI32::new(18);
-    pub static BISHOP_OUTPOST: AtomicI32 = AtomicI32::new(6);
+    pub static BISHOP_OUTPOST: AtomicI32 = AtomicI32::new(4);
 
     /// How much of the evaluation survives in a material configuration that
     /// cannot be won, in sixty-fourths. 64 leaves the evaluation untouched and
@@ -207,7 +207,7 @@ pub mod weights {
     /// Stockfish 19 says +11. Over the 80 games of build `0d213881`, 204 of the
     /// 633 positions we over-read by 200cp or more were endgames of seven
     /// pieces or fewer.
-    pub static DRAWISH_SCALE: AtomicI32 = AtomicI32::new(8);
+    pub static DRAWISH_SCALE: AtomicI32 = AtomicI32::new(7);
 
     /// Set a weight by name. Unknown names are ignored, as UCI requires.
     /// Returns whether the name was recognised.

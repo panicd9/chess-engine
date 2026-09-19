@@ -630,16 +630,19 @@ fn a_stopped_passed_pawn_is_worth_less_than_a_free_one() {
     // paying a seventh-rank pawn ~150cp in the endgame, so a large correction
     // was needed to undo a large illusion. The refitted tables do not create
     // the illusion in the first place, which is the better fix, and the
-    // correction needed is correspondingly smaller (-45 where it was -136).
+    // correction needed is correspondingly smaller.
     //
-    // So assert the thing that actually went wrong in gCd8UcfI as well: two
-    // pawns on the seventh with an enemy knight covering both queening squares
-    // is not a won position, and must not be scored as one. The old tables said
-    // +316 here. Keep this one honest even if the difference test above drifts.
-    let stopped = e("8/1P1P4/2n5/8/8/8/8/K5k1 w - - 0 1");
+    // And assert the shape that actually lost gCd8UcfI: two pawns on the
+    // seventh, an enemy knight covering one queening square and the enemy
+    // **king** next to the other. That last part is what makes it a draw --
+    // Stockfish 19 at depth 30 says -5. Without the king there the same
+    // material is mate in 13, so a test position that leaves it out asserts the
+    // opposite of what it means to. (An earlier version of this assertion did
+    // exactly that and had to be corrected.)
+    let drawn = e("8/1P1Pk3/2n5/8/8/K7/8/8 w - - 0 1");
     assert!(
-        stopped < 150,
-        "two stopped pawns on the seventh scored {stopped}cp, which is the gCd8UcfI blindness"
+        drawn.abs() < 80,
+        "a drawn two-pawns-on-the-seventh endgame scored {drawn}cp; Stockfish says -5"
     );
 }
 
