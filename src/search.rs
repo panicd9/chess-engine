@@ -546,7 +546,7 @@ fn search_node(
         && depth <= FUTILITY_MAX_DEPTH
         && beta < MATE_SCORE_THRESHOLD
         && (if is_white_turn { evaluate(cb) } else { -evaluate(cb) })
-            + FUTILITY_MARGIN_PER_PLY * depth as i32
+            + margins::get(&margins::FUTILITY_PER_PLY) * depth as i32
             <= alpha;
 
     // Iterate over moves, a stage at a time.
@@ -901,7 +901,7 @@ pub fn quiescence_search_best_move(
     if toggles::on(&toggles::DELTA)
         && !checked
         && alpha < MATE_SCORE_THRESHOLD
-        && stand_pat + QUEEN_VALUE + DELTA_MARGIN < alpha
+        && stand_pat + QUEEN_VALUE + margins::get(&margins::DELTA) < alpha
     {
         pool::give(all_moves);
         return (best_score, best_board);
@@ -1195,12 +1195,35 @@ const CHECK_EXTENSION: u32 = 1;
 /// Futility pruning: near the leaves, a quiet move in a position already this
 /// far below alpha is unlikely to claw its way back, so it is skipped. The
 /// margin grows with the depth still to search.
-const FUTILITY_MARGIN_PER_PLY: i32 = 120;
+/// Tunable so the margins can be rescaled without a rebuild: the refitted
+/// piece-square tables moved the pawn from 82 to 101, so every margin below is
+/// ~18% tighter in pawns than when it was chosen, under any normalisation.
+pub mod margins {
+    use std::sync::atomic::{AtomicI32, Ordering};
+    pub static FUTILITY_PER_PLY: AtomicI32 = AtomicI32::new(120);
+    pub static DELTA: AtomicI32 = AtomicI32::new(200);
+    pub static ASPIRATION: AtomicI32 = AtomicI32::new(40);
+    pub fn set(name: &str, value: i32) -> bool {
+        let t = match name.to_ascii_lowercase().as_str() {
+            "futilitymargin" => &FUTILITY_PER_PLY,
+            "deltamargin" => &DELTA,
+            "aspirationwindow" => &ASPIRATION,
+            _ => return false,
+        };
+        t.store(value, Ordering::Relaxed);
+        true
+    }
+    #[inline]
+    pub fn get(w: &AtomicI32) -> i32 {
+        w.load(Ordering::Relaxed)
+    }
+}
+
 const FUTILITY_MAX_DEPTH: u32 = 3;
 
 /// Delta pruning: in quiescence, a capture that cannot bring the score near
 /// alpha even after winning the piece is not worth searching.
-const DELTA_MARGIN: i32 = 200;
+
 /// Value of the most valuable piece that can be captured, for delta pruning.
 const QUEEN_VALUE: i32 = crate::piece_square_tables::MG_VALUE[4];
 
