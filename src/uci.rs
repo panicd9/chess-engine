@@ -511,7 +511,9 @@ impl Options {
                 if let Ok(v) = value.parse::<i32>() {
                     // `set` reports whether it recognised the name; anything
                     // else is ignored, as the protocol requires.
-                    let _ = crate::eval::weights::set(other, v);
+                    if !crate::eval::weights::set(other, v) {
+                        let _ = crate::search::margins::set(other, v);
+                    }
                 }
             }
         }
@@ -771,39 +773,37 @@ pub fn run() -> io::Result<()> {
                     ("BishopMobility", 3, 0, 30),
                     ("RookMobility", 4, 0, 30),
                     ("QueenMobility", 3, 0, 30),
-                    ("KingShield", 5, 0, 100),
-                    ("PassedPawnScale", 84, 0, 400),
+                    ("KingShield", 8, 0, 100),
+                    ("PassedPawnScale", 96, 0, 400),
                     // Adopted after +31.0 at 10+0.1 and +36.4 at 40+0.4; see
                     // `eval::weights`. Must match the statics there.
-                    ("DoubledPawn", 18, 0, 100),
-                    ("IsolatedHalfOpenPawn", 12, 0, 100),
+                    ("DoubledPawn", 21, 0, 100),
+                    ("IsolatedHalfOpenPawn", 20, 0, 100),
                     // What the pieces let a passed pawn do; see
                     // `eval::passed_pawn_pieces`. Must match the statics there.
-                    ("PassedKingThem", 8, 0, 100),
-                    ("PassedKingUs", 2, 0, 100),
-                    ("PassedFreePath", 23, 0, 200),
-                    ("PassedPathOffset", 17, 0, 41),
+                    ("PassedKingThem", 11, 0, 100),
+                    ("PassedKingUs", 3, 0, 100),
+                    ("PassedFreePath", 24, 0, 200),
+                    ("PassedPathOffset", 7, 0, 41),
                     // How much evaluation survives a material configuration
                     // that cannot be won; 64 is off. See `eval::drawish_scale`.
-                    ("DrawishScale", 8, 0, 64),
+                    ("DrawishScale", 7, 0, 64),
                     // Rooks on files the pawns have left, and the bishop pair;
                     // see `eval::rook_files` and `eval::bishop_pair`.
-                    ("RookOpenFile", 10, 0, 100),
-                    ("RookSemiOpenFile", 4, 0, 100),
-                    ("BishopPair", 18, 0, 100),
+                    ("RookOpenFile", 19, 0, 100),
+                    ("RookSemiOpenFile", 13, 0, 100),
+                    ("BishopPair", 32, 0, 100),
                     // Pressure on the enemy king; Scale 0 switches it off.
                     // See `eval::king_attack`.
                     ("KingAttackKnight", 6, 0, 50),
-                    ("KingAttackBishop", 5, 0, 50),
+                    ("KingAttackBishop", 8, 0, 50),
                     ("KingAttackRook", 3, 0, 50),
                     ("KingAttackQueen", 8, 0, 50),
-                    ("KingAttackScale", 56, 0, 400),
-                    // Pieces we attack with something cheaper, and minors that
-                    // cannot be driven off. See `eval::threats`, `eval::outposts`.
-                    ("ThreatByPawn", 35, 0, 200),
-                    ("ThreatByMinor", 22, 0, 200),
-                    ("KnightOutpost", 18, 0, 100),
-                    ("BishopOutpost", 6, 0, 100),
+                    ("KingAttackScale", 62, 0, 400),
+                    // Search margins, in evaluation units. See `search::margins`.
+                    ("FutilityMargin", 120, 0, 600),
+                    ("DeltaMargin", 200, 0, 800),
+                    ("AspirationWindow", 40, 4, 400),
                 ] {
                     println!("option name {name} type spin default {default} min {min} max {max}");
                 }
@@ -984,7 +984,7 @@ fn search_and_report(
     // narrow window prunes far more. When the true score falls outside it the
     // search reports a bound instead of a value, and has to be redone wider --
     // so the window is widened on each failure until it holds.
-    const ASPIRATION_INITIAL: i32 = 40;
+    let aspiration_initial = search::margins::get(&search::margins::ASPIRATION);
     let mut previous: Option<i32> = None;
 
     // How settled the root move is and which way the score is going. Read only
@@ -998,7 +998,7 @@ fn search_and_report(
     for depth in 1..=max_depth {
         let (mut alpha, mut beta) = match previous {
             // Below depth 4 the score is still moving too much to guess at.
-            Some(p) if depth >= 4 => (p - ASPIRATION_INITIAL, p + ASPIRATION_INITIAL),
+            Some(p) if depth >= 4 => (p - aspiration_initial, p + aspiration_initial),
             _ => (i32::MIN + 1, i32::MAX - 1),
         };
         // Per iteration, as Stockfish does, and across its aspiration re-searches.

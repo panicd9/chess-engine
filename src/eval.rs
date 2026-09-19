@@ -53,7 +53,7 @@ pub mod weights {
     /// most surprising part of the fit: counting missing pawns is a crude proxy
     /// for king safety, and overpaying for it makes the engine hold pawns in
     /// front of its king that are worth more elsewhere.
-    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(5);
+    pub static MISSING_SHIELD_PAWN: AtomicI32 = AtomicI32::new(8);
 
     /// Penalty per pawn beyond the first on a file, and per isolated pawn on a
     /// file with no enemy pawn.
@@ -80,8 +80,8 @@ pub mod weights {
     /// They are the two features that survive a change of corpus: top-ranked
     /// against both zurichess `quiet-labeled` and our own game positions, at both
     /// oracle depths. Nothing else in that study does.
-    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(18);
-    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(12);
+    pub static DOUBLED_PAWN: AtomicI32 = AtomicI32::new(21);
+    pub static ISOLATED_HALF_OPEN_PAWN: AtomicI32 = AtomicI32::new(20);
 
     /// Scales the passed pawn bonus, as a percentage. 100 leaves the by-rank
     /// table below unchanged.
@@ -90,7 +90,7 @@ pub mod weights {
     /// regressing `evaluate()` against Stockfish 19 over 66k quiet positions
     /// found the passed-pawn term over-generous by ~16cp per pawn, on top of
     /// what the piece-square tables already pay an advanced pawn.
-    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(84);
+    pub static PASSED_PAWN_SCALE: AtomicI32 = AtomicI32::new(96);
 
     /// How far along a passed pawn's path the pieces let it go. See
     /// [`super::passed_pawn_pieces`]; these scale Stockfish 15's classical
@@ -128,10 +128,10 @@ pub mod weights {
     /// Both runs stopped early -- the first by its SPRT, the second on a
     /// favourable reading of a planned 800 -- so the magnitudes lean high. The
     /// sign is not in doubt at either control.
-    pub static PASSED_KING_THEM: AtomicI32 = AtomicI32::new(8);
-    pub static PASSED_KING_US: AtomicI32 = AtomicI32::new(2);
-    pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(23);
-    pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(17);
+    pub static PASSED_KING_THEM: AtomicI32 = AtomicI32::new(11);
+    pub static PASSED_KING_US: AtomicI32 = AtomicI32::new(3);
+    pub static PASSED_FREE_PATH: AtomicI32 = AtomicI32::new(24);
+    pub static PASSED_PATH_OFFSET: AtomicI32 = AtomicI32::new(7);
 
     /// How dangerous each attacker is on a square next to the enemy king.
     ///
@@ -143,19 +143,19 @@ pub mod weights {
     /// together cost far more than the sum of their parts, which is how an
     /// attack actually works.
     pub static KING_ATTACK_KNIGHT: AtomicI32 = AtomicI32::new(6);
-    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(5);
+    pub static KING_ATTACK_BISHOP: AtomicI32 = AtomicI32::new(8);
     pub static KING_ATTACK_ROOK: AtomicI32 = AtomicI32::new(3);
     pub static KING_ATTACK_QUEEN: AtomicI32 = AtomicI32::new(8);
 
     /// Scales the squared attack total, in 1024ths. **Zero switches the whole
     /// term off**, which is the setting the A/B measures against.
-    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(56);
+    pub static KING_ATTACK_SCALE: AtomicI32 = AtomicI32::new(62);
 
     /// Per rook on a file with no pawns at all, and on one with only enemy
     /// pawns. Both are things the piece-square tables cannot see: a rook's
     /// worth depends on the pawns around it, not on the square it stands on.
-    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(10);
-    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(4);
+    pub static ROOK_OPEN_FILE: AtomicI32 = AtomicI32::new(19);
+    pub static ROOK_SEMI_OPEN_FILE: AtomicI32 = AtomicI32::new(13);
 
     /// For holding both bishops. The tables score each bishop alone, so the
     /// pair's extra worth -- covering both colour complexes -- has nowhere else
@@ -166,34 +166,9 @@ pub mod weights {
     /// quiet-labeled (holdout -0.25%). The first guesses were 20/10/30 -- the
     /// fit wants about half of each, which is the same direction every earlier
     /// fit here has gone.
-    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(18);
+    pub static BISHOP_PAIR: AtomicI32 = AtomicI32::new(32);
 
-    /// Per enemy piece attacked by a pawn, and per enemy piece attacked by a
-    /// piece worth less than it. Nothing in the evaluation saw a hanging or
-    /// harried piece before this: the tables score where a piece stands, the
-    /// mobility term counts squares, and neither notices that the piece is
-    /// about to be won.
-    pub static THREAT_BY_PAWN: AtomicI32 = AtomicI32::new(35);
-    pub static THREAT_BY_MINOR: AtomicI32 = AtomicI32::new(22);
 
-    /// Per knight or bishop on a square defended by one of our pawns, in enemy
-    /// territory, that no enemy pawn can ever attack.
-    ///
-    /// **Open, not settled.** `chess-engine-eval-attribution` recorded outposts
-    /// as a red herring, but that null came from a regression against
-    /// *Stockfish's evaluation*, the objective `chess-engine-pawn-structure-ab`
-    /// later showed disagrees with what wins games; the same regression ranked
-    /// king attacks with a sign that would pay a bonus for being attacked. Its
-    /// outpost coefficient also flips sign between corpora. It was never
-    /// measured over the board, which is what this is for.
-    ///
-    /// Refitted here against **game results**, `KnightOutpost` comes out +22 on
-    /// big3 and +15 on quiet-labeled -- the same sign both ways, where the
-    /// Stockfish-fitted regression could not hold a sign at all. The holdout
-    /// barely moves (-0.01%), so this is a consistent weight rather than a
-    /// demonstrated gain; the A/B is what settles it.
-    pub static KNIGHT_OUTPOST: AtomicI32 = AtomicI32::new(18);
-    pub static BISHOP_OUTPOST: AtomicI32 = AtomicI32::new(6);
 
     /// How much of the evaluation survives in a material configuration that
     /// cannot be won, in sixty-fourths. 64 leaves the evaluation untouched and
@@ -207,7 +182,7 @@ pub mod weights {
     /// Stockfish 19 says +11. Over the 80 games of build `0d213881`, 204 of the
     /// 633 positions we over-read by 200cp or more were endgames of seven
     /// pieces or fewer.
-    pub static DRAWISH_SCALE: AtomicI32 = AtomicI32::new(8);
+    pub static DRAWISH_SCALE: AtomicI32 = AtomicI32::new(7);
 
     /// Set a weight by name. Unknown names are ignored, as UCI requires.
     /// Returns whether the name was recognised.
@@ -235,10 +210,6 @@ pub mod weights {
             "kingattackrook" => &KING_ATTACK_ROOK,
             "kingattackqueen" => &KING_ATTACK_QUEEN,
             "kingattackscale" => &KING_ATTACK_SCALE,
-            "threatbypawn" => &THREAT_BY_PAWN,
-            "threatbyminor" => &THREAT_BY_MINOR,
-            "knightoutpost" => &KNIGHT_OUTPOST,
-            "bishopoutpost" => &BISHOP_OUTPOST,
             _ => return false,
         };
         target.store(value, Ordering::Relaxed);
@@ -267,9 +238,7 @@ pub fn evaluate_split(cb: &Chessboard) -> (i32, i32, i32) {
         + passed_pawn_pieces(cb, &attacks)
         + rook_files(cb)
         + bishop_pair(cb)
-        + king_attack(cb, &attacks)
-        + threats(cb, &attacks)
-        + outposts(cb);
+        + king_attack(cb, &attacks);
     (pst, rest, drawish_scale(cb, pst + rest))
 }
 
@@ -282,94 +251,12 @@ pub fn evaluate(cb: &Chessboard) -> i32 {
         + passed_pawn_pieces(cb, &attacks)
         + rook_files(cb)
         + bishop_pair(cb)
-        + king_attack(cb, &attacks)
-        + threats(cb, &attacks)
-        + outposts(cb);
+        + king_attack(cb, &attacks);
 
     match drawish_scale(cb, raw) {
         64 => raw,
         scale => raw * scale / 64,
     }
-}
-
-/// Enemy pieces we are attacking with something cheaper, from white's point of
-/// view.
-///
-/// Two cases, both of which win material often enough to be worth a term of
-/// their own and neither of which anything else here can see: a piece attacked
-/// by a **pawn**, and a piece attacked by a **minor** when it is worth more
-/// than a minor. The piece-square tables score where a piece stands, mobility
-/// counts the squares it sees, and neither notices it is about to be lost.
-///
-/// This is a static count, not a tactical one -- it does not check whether the
-/// threat can be met. That is the search's job; the term exists so the search
-/// is steered towards making such threats in the first place.
-#[inline]
-fn threats(cb: &Chessboard, attacks: &PieceAttacks) -> i32 {
-    let by_pawn = weights::get(&weights::THREAT_BY_PAWN);
-    let by_minor = weights::get(&weights::THREAT_BY_MINOR);
-    if by_pawn == 0 && by_minor == 0 {
-        return 0;
-    }
-
-    // Pawn attacks, both diagonals, without wrapping round the board.
-    let white_pawn_attacks = ((cb.white_pawns << 9) & !FILE_MASKS[0])
-        | ((cb.white_pawns << 7) & !FILE_MASKS[7]);
-    let black_pawn_attacks = ((cb.black_pawns >> 7) & !FILE_MASKS[0])
-        | ((cb.black_pawns >> 9) & !FILE_MASKS[7]);
-
-    let count = |b: u64| b.count_ones() as i32;
-    // Anything bigger than a pawn is worth winning with a pawn; anything bigger
-    // than a minor is worth winning with a minor.
-    let white_pieces = cb.white_knights | cb.white_bishops | cb.white_rooks | cb.white_queens;
-    let black_pieces = cb.black_knights | cb.black_bishops | cb.black_rooks | cb.black_queens;
-    let white_majors = cb.white_rooks | cb.white_queens;
-    let black_majors = cb.black_rooks | cb.black_queens;
-    let white_minor_attacks = attacks.white[0] | attacks.white[1];
-    let black_minor_attacks = attacks.black[0] | attacks.black[1];
-
-    (count(black_pieces & white_pawn_attacks) - count(white_pieces & black_pawn_attacks)) * by_pawn
-        + (count(black_majors & white_minor_attacks) - count(white_majors & black_minor_attacks))
-            * by_minor
-}
-
-/// Knights and bishops on outposts, from white's point of view.
-///
-/// An outpost is a square a pawn of ours defends, on the enemy's half, that no
-/// enemy pawn can ever attack -- meaning no enemy pawn remains on either
-/// neighbouring file ahead of it. A piece there cannot be driven away and the
-/// tables, which only know the square, cannot express that.
-///
-/// The "no enemy pawn can ever attack it" test is a forward fill of the enemy
-/// pawns over their neighbouring files, which is the same shape the passed-pawn
-/// code uses.
-#[inline]
-fn outposts(cb: &Chessboard) -> i32 {
-    let knight = weights::get(&weights::KNIGHT_OUTPOST);
-    let bishop = weights::get(&weights::BISHOP_OUTPOST);
-    if knight == 0 && bishop == 0 {
-        return 0;
-    }
-
-    const WHITE_HALF: u64 = 0xFFFF_FFFF_0000_0000; // ranks 5-8
-    const BLACK_HALF: u64 = 0x0000_0000_FFFF_FFFF; // ranks 1-4
-
-    let white_pawn_attacks = ((cb.white_pawns << 9) & !FILE_MASKS[0])
-        | ((cb.white_pawns << 7) & !FILE_MASKS[7]);
-    let black_pawn_attacks = ((cb.black_pawns >> 7) & !FILE_MASKS[0])
-        | ((cb.black_pawns >> 9) & !FILE_MASKS[7]);
-
-    // Squares an enemy pawn could still come to attack, ever.
-    let black_can_attack = with_neighbour_files(fill_south(cb.black_pawns));
-    let white_can_attack = with_neighbour_files(fill_north(cb.white_pawns));
-
-    let white_outposts = white_pawn_attacks & WHITE_HALF & !black_can_attack;
-    let black_outposts = black_pawn_attacks & BLACK_HALF & !white_can_attack;
-
-    let count = |b: u64| b.count_ones() as i32;
-    (count(cb.white_knights & white_outposts) - count(cb.black_knights & black_outposts)) * knight
-        + (count(cb.white_bishops & white_outposts) - count(cb.black_bishops & black_outposts))
-            * bishop
 }
 
 /// Pressure on the enemy king, from white's point of view.
