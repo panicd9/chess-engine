@@ -20,6 +20,8 @@ use crate::chessboard::Chessboard;
 use crate::display::to_fen;
 use shakmaty::fen::Fen;
 use shakmaty::{CastlingMode, Chess};
+use shakmaty::uci::UciMove;
+use shakmaty::Position as _;
 use shakmaty_syzygy::{AmbiguousWdl, Tablebase};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
@@ -133,4 +135,44 @@ pub fn probe(cb: &Chessboard) -> Option<Verdict> {
         AmbiguousWdl::MaybeLoss if fresh => Verdict::Loss,
         _ => Verdict::Draw,
     })
+}
+
+/// The distance-to-zeroing optimal move at the root, in UCI notation, with the
+/// verdict it secures.
+///
+/// **Win/draw/loss alone is not enough to play a won endgame.** Every move that
+/// keeps the win returns the same score from `probe`, so the search has no
+/// reason to prefer one, picks whichever the move generator happened to emit
+/// first, and can shuffle until the fifty-move rule takes the win away. Only
+/// the distance-to-zeroing tables order winning moves against each other, and
+/// only at the root does anything need that ordering -- inside the search the
+/// win/draw/loss answer is exactly right.
+///
+/// Returns `None` whenever `probe` would, and also when the DTZ table for this
+/// material is missing while the WDL one is present, which a partial download
+/// makes common.
+pub fn best_move(cb: &Chessboard) -> Option<(String, Verdict)> {
+    let max = max_pieces();
+    if max == 0 || cb.get_occupancy().count_ones() as usize > max {
+        return None;
+    }
+    if cb.white_can_castle_king_side
+        || cb.white_can_castle_queen_side
+        || cb.black_can_castle_king_side
+        || cb.black_can_castle_queen_side
+    {
+        return None;
+    }
+    let tables = TABLES.get()?.as_ref()?;
+    let pos: Chess = to_fen(cb)
+        .parse::<Fen>()
+        .ok()?
+        .into_position(CastlingMode::Standard)
+        .ok()?;
+    let (mv, _dtz) = tables.best_move(&pos).ok()??;
+    // What the position is worth after that move, from our side.
+    let verdict = probe(cb)?;
+    let uci = UciMove::from_standard(mv).to_string();
+    let _ = pos;
+    Some((uci, verdict))
 }
