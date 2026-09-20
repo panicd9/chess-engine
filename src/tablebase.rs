@@ -66,6 +66,39 @@ pub fn load(path: &str) -> (usize, Vec<String>) {
             }
         }
     }
+    // Warn about WDL tables with no DTZ partner. Such a position is known to
+    // be won but has no distance-to-zeroing to steer by, so the root falls back
+    // to the search, where every winning move scores the same and the engine
+    // can shuffle until the fifty-move rule takes the win away. A part-finished
+    // download produces exactly this, and it is silent otherwise.
+    //
+    // Matched by stem across **all** the directories given, because the 6-man
+    // tables are distributed as a `6-wdl` and a `6-dtz` directory and the
+    // partner is never the file next door.
+    let mut wdl = std::collections::HashSet::new();
+    let mut dtz = std::collections::HashSet::new();
+    for dir in path.split(':').filter(|d| !d.is_empty()) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else { continue };
+                match p.extension().and_then(|e| e.to_str()) {
+                    Some("rtbw") => { wdl.insert(stem.to_string()); }
+                    Some("rtbz") => { dtz.insert(stem.to_string()); }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let orphans = wdl.difference(&dtz).count();
+    if orphans > 0 {
+        bad.push(format!(
+            "{orphans} of {} endings have WDL but no DTZ: known won, but nothing \
+             orders the winning moves, so the root cannot convert them",
+            wdl.len()
+        ));
+    }
+
     let max = tb.max_pieces();
     if loaded > 0 {
         MAX_PIECES.store(max, Ordering::Relaxed);
