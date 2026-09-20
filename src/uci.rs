@@ -795,11 +795,17 @@ pub fn run() -> io::Result<()> {
                     ("BishopPair", 32, 0, 100),
                     // Pressure on the enemy king; Scale 0 switches it off.
                     // See `eval::king_attack`.
-                    ("KingAttackKnight", 6, 0, 50),
-                    ("KingAttackBishop", 8, 0, 50),
-                    ("KingAttackRook", 3, 0, 50),
-                    ("KingAttackQueen", 8, 0, 50),
-                    ("KingAttackScale", 62, 0, 400),
+                    ("KingAttackKnight", 50, 0, 400),
+                    ("KingAttackBishop", 96, 0, 400),
+                    ("KingAttackRook", 93, 0, 400),
+                    ("KingAttackQueen", 22, 0, 400),
+                    ("KingAttackScale", 30, 0, 400),
+                    ("CheckKnight", 400, 0, 2000),
+                    ("CheckBishop", 325, 0, 2000),
+                    ("CheckRook", 535, 0, 2000),
+                    ("CheckQueen", 365, 0, 2000),
+                    ("KingRingAttacks", 69, 0, 400),
+                    ("KingNoQueen", 873, 0, 2000),
                     // Search margins, in evaluation units. See `search::margins`.
                     ("FutilityMargin", 120, 0, 600),
                     ("DeltaMargin", 200, 0, 800),
