@@ -19,3 +19,4 @@ pub mod pawn_hash;
 pub mod zobrist;
 pub mod tt;
 pub mod see;
+pub mod tablebase;

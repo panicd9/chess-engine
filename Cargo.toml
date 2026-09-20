@@ -7,6 +7,8 @@ edition = "2021"
 colored = "2.0"
 lazy_static = "1.5.0"
 crossterm = "0.28.1"
+shakmaty-syzygy = "0.28.1"
+shakmaty = "0.30.1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

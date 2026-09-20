@@ -425,6 +425,31 @@ fn search_node(
         }
     }
 
+    // Endgame tablebases. Once the position is inside them the answer is exact,
+    // so the node is done -- no evaluation term can improve on knowing.
+    //
+    // Never at the root: this returns no move, and ply 0 must report one. Never
+    // with castling rights, which Syzygy does not model, though `probe` checks
+    // that too. The score sits below every mate score so a real mate still
+    // outranks a tablebase win, and above every evaluation so the search
+    // steers towards winning ones.
+    //
+    // The result is **not stored in the table**. It is exact for this position
+    // but the fifty-move handling in `probe` reads the halfmove clock, which is
+    // path information, and the table is keyed only on the position -- the same
+    // reason a repetition draw sets `path_dependent` rather than being cached.
+    if toggles::on(&toggles::SYZYGY) && ply > 0 {
+        if let Some(verdict) = crate::tablebase::probe(cb) {
+            history.path_dependent = true;
+            let score = match verdict {
+                crate::tablebase::Verdict::Win => TB_WIN_SCORE - ply as i32,
+                crate::tablebase::Verdict::Loss => -TB_WIN_SCORE + ply as i32,
+                crate::tablebase::Verdict::Draw => DRAW,
+            };
+            return (score, *cb);
+        }
+    }
+
     // Null-move pruning. Hand the opponent a free move: if our position is so
     // strong that they still cannot pull it below beta, then a real move will
     // be at least as good and this whole node can be cut.
@@ -1165,6 +1190,8 @@ pub mod toggles {
     pub static DELTA: AtomicBool = AtomicBool::new(true);
     pub static LMR: AtomicBool = AtomicBool::new(true);
     pub static NULL_MOVE: AtomicBool = AtomicBool::new(true);
+    /// Probe Syzygy endgame tablebases in the search.
+    pub static SYZYGY: AtomicBool = AtomicBool::new(true);
 
     /// Set one by name. Returns whether the name was recognised.
     pub fn set(name: &str, on: bool) -> bool {
@@ -1175,6 +1202,7 @@ pub mod toggles {
             "delta" => &DELTA,
             "lmr" => &LMR,
             "nullmove" => &NULL_MOVE,
+            "syzygy" => &SYZYGY,
             _ => return false,
         };
         target.store(on, Ordering::Relaxed);
@@ -1260,6 +1288,19 @@ pub const DRAW: i32 = 0;
 /// Mate scores are kept this far from the ends of the range so that negating
 /// one, which negamax does at every node, cannot overflow.
 const MATE_BOUND: i32 = 1000;
+
+/// A tablebase win, before the ply adjustment that prefers a shorter one.
+///
+/// Comfortably above any evaluation this engine produces -- queen odds is about
+/// +5000 -- so a known win always outranks a merely good position. And far
+/// below `MATE_SCORE_THRESHOLD`, so `is_mate_score` does not mistake it for a
+/// mate, the mate-distance decoder never sees it, and a real mate still
+/// outranks a tablebase win.
+///
+/// Deliberately a small number rather than something near `i32::MAX`: it is
+/// reported to the GUI as a centipawn score, and `cp 2147471646` is not a
+/// score anyone can read.
+const TB_WIN_SCORE: i32 = 20_000;
 
 /// Plies to mate encoded in `score`, or `None` if it is an ordinary score.
 ///
