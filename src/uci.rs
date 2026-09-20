@@ -727,6 +727,7 @@ pub fn run() -> io::Result<()> {
                     "option name Move Overhead type spin default {DEFAULT_MOVE_OVERHEAD_MS} \
                      min 0 max 5000"
                 );
+                println!("option name SyzygyPath type string default <empty>");
                 println!(
                     "option name Soft Scale type spin default {DEFAULT_SOFT_SCALE_PERCENT} \
                      min 10 max 200"
@@ -765,6 +766,7 @@ pub fn run() -> io::Result<()> {
                 println!("option name Ponder type check default false");
                 for name in [
                     "CheckExtensions", "History", "Futility", "Delta", "LMR", "NullMove",
+                    "Syzygy",
                 ] {
                     println!("option name {name} type check default true");
                 }
@@ -822,6 +824,24 @@ pub fn run() -> io::Result<()> {
                 println!("uciok");
             }
             "setoption" => {
+                // Tablebases load once, when the path is first given. Loading
+                // is slow enough (a file open per table) that it must not
+                // happen inside a search.
+                if let Some(rest) = line.split_once("name SyzygyPath value") {
+                    let path = rest.1.trim();
+                    if !path.is_empty() && path != "<empty>" {
+                        let (loaded, bad) = crate::tablebase::load(path);
+                        println!(
+                            "info string syzygy: {loaded} tables, max {} pieces, {} rejected",
+                            crate::tablebase::max_pieces(),
+                            bad.len()
+                        );
+                        for b in bad.iter().take(5) {
+                            println!("info string syzygy rejected {b}");
+                        }
+                    }
+                    continue;
+                }
                 let previous = options.table_megabytes;
                 options.apply(&line);
                 // The table now lives across moves, so a size change has to be
