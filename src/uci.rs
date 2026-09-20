@@ -788,6 +788,12 @@ pub fn run() -> io::Result<()> {
                     // How much evaluation survives a material configuration
                     // that cannot be won; 64 is off. See `eval::drawish_scale`.
                     ("DrawishScale", 7, 0, 64),
+                    // Threats, Stockfish 15 shapes. See `eval::threats`.
+                    ("ThreatSafePawn", 92, 0, 600),
+                    ("ThreatHanging", 14, 0, 400),
+                    ("ThreatRestricted", 9, 0, 100),
+                    ("ThreatWeakQueenProt", 4, 0, 200),
+                    ("ThreatScale", 22, 0, 256),
                     // Rooks on files the pawns have left, and the bishop pair;
                     // see `eval::rook_files` and `eval::bishop_pair`.
                     ("RookOpenFile", 19, 0, 100),
