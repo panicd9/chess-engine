@@ -188,6 +188,34 @@ pub mod weights {
 
 
 
+    /// Threats, Stockfish 15's `Evaluation::threats()` shapes. Per *victim*,
+    /// because winning a queen is not winning a pawn -- the flat term removed
+    /// earlier could not say that.
+    ///
+    /// A victim counts only if it is **weak**: not defended by an enemy pawn.
+    /// The removed term counted any attacked piece, which is why it measured
+    /// -3.9 +/- 14.7 and came out. A hanging piece is found by the search at
+    /// depth one; what an evaluation can add is whether the threat *sticks*.
+    ///
+    /// Stockfish's midgame values, as a starting point:
+    /// minor victim 6/64/82/103/81 by pawn/knight/bishop/rook/queen,
+    /// rook victim 3/36/44/0/60, Hanging 72, ThreatBySafePawn 167,
+    /// RestrictedPiece 6, WeakQueenProtection 14.
+    pub static THREAT_MINOR_ON: [AtomicI32; 5] = [
+        AtomicI32::new(6), AtomicI32::new(64), AtomicI32::new(82),
+        AtomicI32::new(103), AtomicI32::new(81),
+    ];
+    pub static THREAT_ROOK_ON: [AtomicI32; 5] = [
+        AtomicI32::new(3), AtomicI32::new(36), AtomicI32::new(44),
+        AtomicI32::new(0), AtomicI32::new(60),
+    ];
+    pub static THREAT_SAFE_PAWN: AtomicI32 = AtomicI32::new(92);
+    pub static THREAT_HANGING: AtomicI32 = AtomicI32::new(14);
+    pub static THREAT_RESTRICTED: AtomicI32 = AtomicI32::new(9);
+    pub static THREAT_WEAK_QUEEN_PROT: AtomicI32 = AtomicI32::new(4);
+    /// Scales the whole threat term, in sixty-fourths. Zero switches it off.
+    pub static THREAT_SCALE: AtomicI32 = AtomicI32::new(22);
+
     /// How much of the evaluation survives in a material configuration that
     /// cannot be won, in sixty-fourths. 64 leaves the evaluation untouched and
     /// is the setting that reproduces the pre-term engine exactly.
@@ -220,6 +248,11 @@ pub mod weights {
             "passedfreepath" => &PASSED_FREE_PATH,
             "passedpathoffset" => &PASSED_PATH_OFFSET,
             "drawishscale" => &DRAWISH_SCALE,
+            "threatsafepawn" => &THREAT_SAFE_PAWN,
+            "threathanging" => &THREAT_HANGING,
+            "threatrestricted" => &THREAT_RESTRICTED,
+            "threatweakqueenprot" => &THREAT_WEAK_QUEEN_PROT,
+            "threatscale" => &THREAT_SCALE,
             "rookopenfile" => &ROOK_OPEN_FILE,
             "rooksemiopenfile" => &ROOK_SEMI_OPEN_FILE,
             "bishoppair" => &BISHOP_PAIR,
@@ -260,6 +293,7 @@ pub fn evaluate_split(cb: &Chessboard) -> (i32, i32, i32) {
         + king_safety(cb)
         + crate::pawn_hash::passed_pawns(cb)
         + passed_pawn_pieces(cb, &attacks)
+        + threats(cb, &attacks)
         + rook_files(cb)
         + bishop_pair(cb)
         + king_attack(cb, &attacks);
@@ -273,6 +307,7 @@ pub fn evaluate(cb: &Chessboard) -> i32 {
         + king_safety(cb)
         + crate::pawn_hash::passed_pawns(cb)
         + passed_pawn_pieces(cb, &attacks)
+        + threats(cb, &attacks)
         + rook_files(cb)
         + bishop_pair(cb)
         + king_attack(cb, &attacks);
@@ -433,6 +468,102 @@ const KING_FLANK: [u64; 8] = {
 /// is Stockfish's `Camp`: ranks 1-5 for White, 4-8 for Black.
 const WHITE_CAMP: u64 = 0x0000_00FF_FFFF_FFFF; // ranks 1-5
 const BLACK_CAMP: u64 = 0xFFFF_FFFF_FF00_0000; // ranks 4-8
+
+/// Threats, from white's point of view. Stockfish 15's `Evaluation::threats()`
+/// shapes, with the magnitudes refitted.
+///
+/// The term this replaces counted every enemy piece attacked by a pawn or by a
+/// minor, flat, with no notion of whether the victim was defended or the
+/// attacker safe. It measured -3.9 +/- 14.7 and was removed. Three things are
+/// different here:
+///
+/// - **Only weak victims count** -- those no enemy pawn defends. A piece
+///   defended by a pawn is not won by attacking it.
+/// - **Value by victim.** Threatening a queen with a knight is not threatening
+///   a pawn with a knight.
+/// - **The attacking pawn must itself be safe**, for the `ThreatBySafePawn`
+///   bonus, which is Stockfish's largest threat line at 167.
+///
+/// Stockfish qualifies "strongly protected" with squares the enemy attacks
+/// twice and we do not, and its `Hanging` bonus uses our own double attacks.
+/// Both need double-attack sets, which cost 21% of search speed to build here,
+/// so this approximates them with pawn defence and total attacks.
+#[inline]
+fn threats(cb: &Chessboard, attacks: &PieceAttacks) -> i32 {
+    let scale = weights::get(&weights::THREAT_SCALE);
+    if scale == 0 {
+        return 0;
+    }
+    // Occupancies once, not once per side.
+    let white_occ = cb.get_white_occupancy();
+    let black_occ = cb.get_black_occupancy();
+    let side = |white: bool| -> i32 {
+        let (us, them_pawn_att, us_all, them_all) = if white {
+            (&attacks.white, attacks.black_pawn, attacks.white_all, attacks.black_all)
+        } else {
+            (&attacks.black, attacks.white_pawn, attacks.black_all, attacks.white_all)
+        };
+        let (their_pawns, their_pieces, our_pawns) = if white {
+            (cb.black_pawns, black_occ, cb.white_pawns)
+        } else {
+            (cb.white_pawns, white_occ, cb.black_pawns)
+        };
+
+        // Weak: theirs, no enemy pawn defends it, and we attack it.
+        let weak = their_pieces & !them_pawn_att & us_all;
+        let restricted = them_all & !them_pawn_att & us_all;
+        // Nothing of theirs is loose and nothing is restricted: the common case
+        // in a quiet position, and the cheap way out of the victim loops.
+        if weak == 0 && restricted == 0 {
+            return 0;
+        }
+        let mut total = (restricted).count_ones() as i32
+            * weights::get(&weights::THREAT_RESTRICTED);
+        if weak != 0 {
+            let minors = us[0] | us[1];
+            if weak & minors != 0 {
+                total += sum_victims(cb, weak & minors, &weights::THREAT_MINOR_ON);
+            }
+            if weak & us[2] != 0 {
+                total += sum_victims(cb, weak & us[2], &weights::THREAT_ROOK_ON);
+            }
+            total += (weak & !them_all).count_ones() as i32
+                * weights::get(&weights::THREAT_HANGING);
+            total += (weak & us[3]).count_ones() as i32
+                * weights::get(&weights::THREAT_WEAK_QUEEN_PROT);
+        }
+        // Non-pawn enemies attacked by a pawn that is itself on a safe square.
+        let non_pawn = their_pieces & !their_pawns;
+        if non_pawn != 0 {
+            let safe_pawns = our_pawns & (!them_all | us_all);
+            let hits = if white {
+                ((safe_pawns << 9) & !FILE_MASKS[0]) | ((safe_pawns << 7) & !FILE_MASKS[7])
+            } else {
+                ((safe_pawns >> 7) & !FILE_MASKS[0]) | ((safe_pawns >> 9) & !FILE_MASKS[7])
+            };
+            total += (hits & non_pawn).count_ones() as i32
+                * weights::get(&weights::THREAT_SAFE_PAWN);
+        }
+        total
+    };
+    (side(true) - side(false)) * scale / 64
+}
+
+/// Sum a per-victim table over the pieces standing on `targets`.
+#[inline]
+fn sum_victims(cb: &Chessboard, mut targets: u64, table: &[std::sync::atomic::AtomicI32; 5]) -> i32 {
+    let mut total = 0;
+    while targets != 0 {
+        let sq = targets.trailing_zeros() as usize;
+        targets &= targets - 1;
+        // ColoredPiece is pawn,knight,bishop,rook,queen,king interleaved by colour.
+        let code = cb.piece_square[sq] as usize;
+        if code < 10 {
+            total += weights::get(&table[code / 2]);
+        }
+    }
+    total
+}
 
 /// Rooks on files the pawns have left, from white's point of view.
 ///
