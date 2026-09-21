@@ -220,5 +220,9 @@ reasons stopped the walk.
 `examples/` holds the harnesses: `bench_all` (perft and fixed-depth search, with
 an allocation counter), `equiv` (nodes, score and best move over twelve
 positions — the check that a change is behaviour-preserving), `tune` (hash size
-and depth sweeps) and `micro` (per-function timings: eval, zobrist, the
-king-attack test, one generation call).
+and depth sweeps), `micro` (per-function timings: eval, zobrist, the
+king-attack test, one generation call) and `tbprobe` (where a Syzygy probe's
+time goes, conversion against table lookup). Build `tbprobe` with
+`--features tbstats` and trust only its in-search split: the lookup costs about
+4x more in the search than in a tight loop, where the mapped pages stay
+resident.

@@ -26,6 +26,10 @@ codegen-units = 1
 # Hit/miss counting for the pawn hash. Off by default: the shipped engine
 # must not pay a thread-local increment per probe for an instrument.
 pawnstats = []
+# Per-probe timing for the Syzygy tables, split into the shakmaty conversion
+# and the table lookup. Off by default for the same reason as pawnstats: the
+# shipped engine must not pay a clock read per probe.
+tbstats = []
 
 [[example]]
 name = "pawnhitrate"
