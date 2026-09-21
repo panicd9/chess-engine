@@ -7,9 +7,12 @@
 //! is a draw -- and a five-piece table simply knows.
 //!
 //! Probing is done through `shakmaty_syzygy`, which wants its own board type,
-//! so a position crosses over as a FEN. That costs a parse per probe and is
-//! only affordable because probes are rare: the search asks only when the piece
-//! count is already inside the tables.
+//! so a position crosses over as a FEN. That round trip is **not** where the
+//! time goes. Timed inside the search, from a 7-piece position, the conversion
+//! is 2-3% of search time and the table lookup 65-70%, and probing makes the
+//! search 3.2-3.6x slower. `examples/tbprobe` with `--features tbstats`
+//! measures it -- in the search, because a tight loop understates the lookup
+//! about 4x.
 //!
 //! Loading is **file by file rather than by directory**. `add_directory` gives
 //! up on the first unusable file, which turns one truncated download into "no
@@ -39,6 +42,10 @@ static TABLES: OnceLock<Option<Tablebase<Chess>>> = OnceLock::new();
 /// which is the check the search makes before doing anything else.
 static MAX_PIECES: AtomicUsize = AtomicUsize::new(0);
 static HITS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "tbstats")]
+static CONV_NS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "tbstats")]
+static WDL_NS: AtomicUsize = AtomicUsize::new(0);
 
 /// Load every table under the given colon-separated directories. Returns
 /// (tables loaded, files rejected). Safe to call once; later calls are ignored.
@@ -120,6 +127,20 @@ pub fn hits() -> usize {
 
 pub fn reset_hits() {
     HITS.store(0, Ordering::Relaxed);
+    #[cfg(feature = "tbstats")]
+    {
+        CONV_NS.store(0, Ordering::Relaxed);
+        WDL_NS.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Nanoseconds spent converting positions into shakmaty, and nanoseconds spent
+/// in the tables, as measured where the search actually pays them. A tight
+/// loop understates the lookup about 4x: there the mapped pages stay resident
+/// and the caches stay hot, and in a search neither is true.
+#[cfg(feature = "tbstats")]
+pub fn probe_nanos() -> (usize, usize) {
+    (CONV_NS.load(Ordering::Relaxed), WDL_NS.load(Ordering::Relaxed))
 }
 
 /// Ask the tables about this position, from the side to move's point of view.
@@ -153,12 +174,21 @@ pub fn probe(cb: &Chessboard) -> Option<Verdict> {
         return None;
     }
     let tables = TABLES.get()?.as_ref()?;
+    #[cfg(feature = "tbstats")]
+    let t0 = std::time::Instant::now();
     let pos: Chess = to_fen(cb)
         .parse::<Fen>()
         .ok()?
         .into_position(CastlingMode::Standard)
         .ok()?;
+    #[cfg(feature = "tbstats")]
+    let t1 = std::time::Instant::now();
     let wdl = tables.probe_wdl(&pos).ok()?;
+    #[cfg(feature = "tbstats")]
+    {
+        CONV_NS.fetch_add((t1 - t0).as_nanos() as usize, Ordering::Relaxed);
+        WDL_NS.fetch_add(t1.elapsed().as_nanos() as usize, Ordering::Relaxed);
+    }
     HITS.fetch_add(1, Ordering::Relaxed);
     let fresh = cb.halfmove_clock == 0;
     Some(match wdl {
